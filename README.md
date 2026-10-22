@@ -85,7 +85,7 @@ Enables native, local split-screen multiplayer inside **BeamNG.drive Career Mode
 
 ---
 
-## 🕹️ Controls & Keybindings
+## 🕹️ Controls & Keybindings (DEFAULT)
 
 | Action | Keyboard | Controller | Description |
 | :--- | :--- | :--- | :--- |
@@ -93,7 +93,7 @@ Enables native, local split-screen multiplayer inside **BeamNG.drive Career Mode
 | **Pause Menu** | `ESC` | `Start / Options` | Open pause menu with split-screen rail |
 | **Big Map** | `M` | `Select / View` | Open world map with dual player route selector |
 | **Set Route at Pin** | `Enter` / `Space` | `(A)` | Drop or remove navigation waypoint at map pin |
-| **Interact / Prompt** | `E` | `(A)` / Configured | Trigger gas pump, garage, or mission prompt |
+| **Interact / Prompt** | `SHIFT + E` | `RB + (Y)` / Configured | Trigger gas pump, garage, or mission prompt |
 | **Get In / Out** | `F` | `(Y)` / Configured | Exit vehicle to walk or enter another vehicle |
 
 ---
