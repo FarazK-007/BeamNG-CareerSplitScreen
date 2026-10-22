@@ -31,8 +31,9 @@ M.colorSets = {
     decals = {0, 1, 0},
     arrows = {0, 1, 0},
   },
-
 }
+M.color = {0, 0.4, 1}
+M.floatingArrowColor = {0, 0.48, 0.77}
 
 local routePlannersByPlayer = {}
 local endWPByPlayer = {}
@@ -129,13 +130,14 @@ end
 
 local decalScale = 3
 local function getNewData()
+  local c = M.color or {0, 0.4, 1}
   -- create decals
   local data = {
     texture = 'art/shapes/arrows/arrow_groundmarkers_1.png',
     pos = vec3(),
     position = vec3(0, 0, 0),
     forwardVec = vec3(0, 0, 0),
-    color = ColorF(M.color[1], M.color[2], M.color[3], 0 ),
+    color = ColorF(c[1], c[2], c[3], 0 ),
     scale = vec3(0.5*decalScale, 1*decalScale, 2),
     fadeStart = 100,
     fadeEnd = 120
@@ -389,9 +391,10 @@ end
 
 local function sendToApp()
   local targetRp = getRoutePlanner(M.targetPlayerIndex or 0)
+  local c = M.color or {0, 0.4, 1}
   local data = {
     markers = {},
-    color = string.format("#%02X%02X%02XFF", M.color[1]*255, M.color[2]*255, M.color[3]*255)
+    color = string.format("#%02X%02X%02XFF", c[1]*255, c[2]*255, c[3]*255)
   }
   local id = 1
   if targetRp and targetRp.path then

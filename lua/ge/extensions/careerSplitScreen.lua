@@ -65,6 +65,262 @@ local function getP2Vehicle()
   return nil
 end
 
+local function isSplitModeActive()
+  return isSplitActive or (render_splitScreen and render_splitScreen.isEnabled and render_splitScreen.isEnabled())
+end
+
+-- Hook marker interaction to ensure prompts are never suppressed during Career Split-Screen
+local function hookMarkerInteraction()
+  local function wrapPreRender(ext, name)
+    if not ext or ext._careerSplitMarkerHooked then return end
+    ext._careerSplitMarkerHooked = true
+    local origPreRender = ext.onPreRender
+    ext.onPreRender = function(...)
+      if isSplitModeActive() and core_multiseat and core_multiseat.isMultiseatActive then
+        local origIsMultiseatActive = core_multiseat.isMultiseatActive
+        core_multiseat.isMultiseatActive = function() return false end
+        local ok, err = pcall(origPreRender, ...)
+        core_multiseat.isMultiseatActive = origIsMultiseatActive
+        if not ok then
+          log("E", "careerSplitScreen", "Error during " .. tostring(name) .. " onPreRender: " .. tostring(err))
+        end
+        return
+      end
+      if origPreRender then
+        return origPreRender(...)
+      end
+    end
+    log("I", "careerSplitScreen", "Hooked " .. tostring(name) .. " for split-screen marker interaction.")
+  end
+
+  wrapPreRender(gameplay_markerInteraction, "gameplay_markerInteraction")
+  wrapPreRender(overhaul_integration_services_markerInteraction, "overhaul_integration_services_markerInteraction")
+end
+
+local function selectAtCursor()
+  if not freeroam_bigMapMode or not freeroam_bigMapMode.bigMapActive() then return end
+
+  -- 1. If a POI is hovered under the crosshair, select it
+  if freeroam_bigMapMode.hoveredPoiId then
+    if freeroam_bigMapMode.selectPoi then
+      freeroam_bigMapMode.selectPoi(freeroam_bigMapMode.hoveredPoiId)
+      Engine.Audio.playOnce('AudioGui', 'event:>UI>Main>select')
+      return
+    end
+  end
+
+  -- 2. If a POI is currently selected, deselect it
+  if freeroam_bigMapMode.selectedPoiId then
+    if freeroam_bigMapMode.deselect then
+      freeroam_bigMapMode.deselect()
+      return
+    end
+  end
+
+  -- 3. Raycast down from the center crosshair
+  local camDir = core_camera.getQuat() * vec3(0, 1, 0)
+  local ray = {pos = core_camera.getPosition(), dir = camDir}
+  local hitDist = castRayStatic(ray.pos, ray.dir, 50000)
+  if hitDist < 50000 then
+    local hitPos = ray.pos + ray.dir * hitDist
+    local currentTarget = (core_groundMarkers and core_groundMarkers.getTargetPlayer and core_groundMarkers.getTargetPlayer()) or 0
+    if core_groundMarkers and core_groundMarkers.currentlyHasTarget and core_groundMarkers.currentlyHasTarget(currentTarget) then
+      freeroam_bigMapMode.setNavFocus(nil)
+    else
+      freeroam_bigMapMode.setNavFocus(hitPos)
+      Engine.Audio.playOnce('AudioGui', 'event:>UI>Main>Click_Tonal_01')
+    end
+  end
+end
+
+local function bindBigMapSelectKeys()
+  local am = scenetree.findObject("BigMapActionMap")
+  if am and core_input_actions and core_input_actions.actionToCommands then
+    local success, actionMap, actsOnChange, onChange, actsOnDown, onDown, actsOnUp, onUp, isRelative, ctx, isCentered = core_input_actions.actionToCommands("bigMapControllerSelect")
+    local jsonFfb = jsonEncode({updateType = 0})
+    for devname, _ in pairs(core_input_bindings.devices or {}) do
+      if string.find(devname, "keyboard") then
+        pcall(function()
+          am:bind(devname, "bigMapControllerSelect", "return", isCentered, 0, 0, 1, 0, 0, false, false, false, false, 0, 0, 0, jsonFfb, actsOnChange, onChange, actsOnDown, onDown, actsOnUp, onUp, 0, isRelative, 0, ctx)
+          am:bind(devname, "bigMapControllerSelect", "enter", isCentered, 0, 0, 1, 0, 0, false, false, false, false, 0, 0, 0, jsonFfb, actsOnChange, onChange, actsOnDown, onDown, actsOnUp, onUp, 0, isRelative, 0, ctx)
+          am:bind(devname, "bigMapControllerSelect", "numpadenter", isCentered, 0, 0, 1, 0, 0, false, false, false, false, 0, 0, 0, jsonFfb, actsOnChange, onChange, actsOnDown, onDown, actsOnUp, onUp, 0, isRelative, 0, ctx)
+          am:bind(devname, "bigMapControllerSelect", "space", isCentered, 0, 0, 1, 0, 0, false, false, false, false, 0, 0, 0, jsonFfb, actsOnChange, onChange, actsOnDown, onDown, actsOnUp, onUp, 0, isRelative, 0, ctx)
+        end)
+      end
+    end
+  end
+end
+
+local function hookBigMapMode()
+  if freeroam_bigMapMode and not freeroam_bigMapMode._careerSplitHooked then
+    freeroam_bigMapMode._careerSplitHooked = true
+
+    -- Hook camMode.onMouseButton: in split-screen mode, left click should not drag or pan the map
+    local camMode = core_camera and core_camera.getGlobalCameras and core_camera.getGlobalCameras()["bigMap"]
+    if camMode and not camMode._careerSplitHooked then
+      camMode._careerSplitHooked = true
+      local origCamOnMouseButton = camMode.onMouseButton
+      camMode.onMouseButton = function(self, buttonDown, mouseDragging, ...)
+        if isSplitModeActive() then
+          -- In split-screen: left click should not drag or pan the map
+          return
+        end
+        if origCamOnMouseButton then
+          return origCamOnMouseButton(self, buttonDown, mouseDragging, ...)
+        end
+      end
+    end
+
+    local origToggleBigMap = freeroam_bigMapMode.toggleBigMap
+    freeroam_bigMapMode.toggleBigMap = function(...)
+      if isSplitModeActive() or isCareerModeActive() then
+        if freeroam_bigMapMode.bigMapActive() then
+          freeroam_bigMapMode.exitBigMap(true, true)
+          return
+        else
+          if overhaul_phone_phone and overhaul_phone_phone.isPhoneOpen and overhaul_phone_phone.isPhoneOpen() then
+            overhaul_phone_phone.closePhone()
+          end
+          freeroam_bigMapMode.enterBigMap({instant = true, forceOpen = true})
+          return
+        end
+      end
+      if origToggleBigMap then
+        return origToggleBigMap(...)
+      end
+    end
+
+    local origEnterBigMap = freeroam_bigMapMode.enterBigMap
+    freeroam_bigMapMode.enterBigMap = function(options, ...)
+      options = options or {}
+      if isSplitModeActive() then
+        options.instant = true
+        options.forceOpen = true
+      end
+      if origEnterBigMap then
+        local res = origEnterBigMap(options, ...)
+        if isSplitModeActive() then
+          bindBigMapSelectKeys()
+        end
+        return res
+      end
+    end
+
+    local origExitBigMap = freeroam_bigMapMode.exitBigMap
+    freeroam_bigMapMode.exitBigMap = function(instant, closeEscMenu, forceGameCam, ...)
+      if isSplitModeActive() then
+        instant = true
+      end
+      local res
+      if origExitBigMap then
+        res = origExitBigMap(instant, closeEscMenu, forceGameCam, ...)
+      end
+      if isSplitModeActive() then
+        if extensions.ui_menuManager and extensions.ui_menuManager.setGameplayRoute then
+          extensions.ui_menuManager.setGameplayRoute("multiseat")
+        end
+        if extensions.ui_router and extensions.ui_router.reload then
+          extensions.ui_router.reload("multiseat", nil, {force = true})
+        end
+      end
+      return res
+    end
+
+    -- Hook onCameraPreRender: crosshair is always visible ONLY in split-screen mode
+    local origOnCameraPreRender = freeroam_bigMapMode.onCameraPreRender
+    freeroam_bigMapMode.onCameraPreRender = function(camData, ...)
+      if origOnCameraPreRender then
+        origOnCameraPreRender(camData, ...)
+      end
+      if isSplitModeActive() and freeroam_bigMapMode.bigMapActive() then
+        local iconRenderer = gameplay_playmodeMarkers and gameplay_playmodeMarkers.getBigmapRendererObj and gameplay_playmodeMarkers.getBigmapRendererObj()
+        if iconRenderer then
+          local crosshair = iconRenderer:getIconByName("controllerCrosshair")
+          if crosshair then
+            crosshair.color = ColorI(255, 255, 255, 255)
+          end
+        end
+      end
+    end
+
+    -- Hook onMouseButton: in split-screen mode, mouse left click sets route or selects POI without dragging the map
+    local origOnMouseButton = freeroam_bigMapMode.onMouseButton
+    freeroam_bigMapMode.onMouseButton = function(buttonDown, ...)
+      if isSplitModeActive() and freeroam_bigMapMode.bigMapActive() then
+        -- Check if mouse click is on our ImGui Top Bar (Route For: P1, P2)
+        local im = ui_imgui
+        if im and im.GetMousePos then
+          local mPos = im.GetMousePos()
+          local canvas = scenetree.findObject("Canvas")
+          local winW = 1920
+          if canvas and canvas.getWindowClientSizeXY then
+            winW = canvas:getWindowClientSizeXY()
+          end
+          local barW = 540
+          local minX = (winW - barW) * 0.5
+          local maxX = (winW + barW) * 0.5
+          if mPos and mPos.x >= minX and mPos.x <= maxX and mPos.y >= 0 and mPos.y <= 75 then
+            -- Click is inside the Top Bar; let ImGui handle it exclusively
+            return
+          end
+        end
+
+        local cMode = core_camera and core_camera.getGlobalCameras and core_camera.getGlobalCameras()["bigMap"]
+        if cMode and cMode.onMouseButton then
+          cMode:onMouseButton(false, false)
+        end
+
+        if not buttonDown then
+          -- Left mouse release: set route or select hovered POI without map drag
+          if freeroam_bigMapMode.hoveredPoiId then
+            if freeroam_bigMapMode.selectPoi then
+              freeroam_bigMapMode.selectPoi(freeroam_bigMapMode.hoveredPoiId)
+              Engine.Audio.playOnce('AudioGui', 'event:>UI>Main>select')
+              return
+            end
+          end
+
+          local ray = getCameraMouseRay()
+          if ray then
+            local hitDist = castRayStatic(ray.pos, ray.dir, 50000)
+            if hitDist < 50000 then
+              local hitPos = ray.pos + ray.dir * hitDist
+              local currentTarget = (core_groundMarkers and core_groundMarkers.getTargetPlayer and core_groundMarkers.getTargetPlayer()) or 0
+              if core_groundMarkers and core_groundMarkers.currentlyHasTarget and core_groundMarkers.currentlyHasTarget(currentTarget) then
+                freeroam_bigMapMode.setNavFocus(nil)
+              else
+                freeroam_bigMapMode.setNavFocus(hitPos)
+                Engine.Audio.playOnce('AudioGui', 'event:>UI>Main>Click_Tonal_01')
+              end
+              return
+            end
+          end
+        end
+        return
+      end
+
+      if origOnMouseButton then
+        return origOnMouseButton(buttonDown, ...)
+      end
+    end
+
+    -- Hook onControllerSelect: sets route or selects POI under the center crosshair
+    local origOnControllerSelect = freeroam_bigMapMode.onControllerSelect
+    freeroam_bigMapMode.onControllerSelect = function(...)
+      if isSplitModeActive() and freeroam_bigMapMode.bigMapActive() then
+        selectAtCursor()
+        return
+      end
+
+      if origOnControllerSelect then
+        return origOnControllerSelect(...)
+      end
+    end
+
+    log("I", "careerSplitScreen", "Hooked freeroam_bigMapMode: split-screen controller crosshair and drag-free route clicks.")
+  end
+end
+
 -- Safely orient and place Player 2 relative to Player 1
 local function positionP2NearP1(p1Veh, p2Veh, resetVehicle)
   if not p1Veh or not p2Veh then return end
@@ -332,6 +588,14 @@ local function startSplitScreen()
 
   isSplitActive = true
   hookBigMapMode()
+  hookMarkerInteraction()
+
+  if overhaul_integration_services_markerInteraction and overhaul_integration_services_markerInteraction.setForceReevaluateOpenPrompt then
+    overhaul_integration_services_markerInteraction.setForceReevaluateOpenPrompt()
+  end
+  if gameplay_markerInteraction and gameplay_markerInteraction.setForceReevaluateOpenPrompt then
+    gameplay_markerInteraction.setForceReevaluateOpenPrompt()
+  end
 
   -- Set the gameplay route to multiseat so MultiseatHud mounts and displays speedometers for both players
   if extensions.ui_menuManager and extensions.ui_menuManager.setGameplayRoute then
@@ -642,7 +906,7 @@ local function onPauseHomeRailBuildMultiseatActions(actions, context, registerBu
   table.insert(actions, registerButton({
     id = "home.careerSplitScreenSwitchVeh",
     label = "Get / Switch P2 Car",
-    icon = "carsChange",
+    icon = "carToWheels",
     visible = true,
     enabled = true,
   }, function()
@@ -653,7 +917,7 @@ local function onPauseHomeRailBuildMultiseatActions(actions, context, registerBu
   table.insert(actions, registerButton({
     id = "home.careerSplitScreenSettings",
     label = "Split-Screen Settings",
-    icon = "cogs",
+    icon = "wrench",
     visible = true,
     enabled = true,
   }, function()
@@ -751,7 +1015,7 @@ local function onBeforeRadialOpened()
 
         table.insert(entries, {
           title = "Split-Screen Settings",
-          icon = "cogs",
+          icon = "wrench",
           startSlot = 3,
           endSlot = 3,
           position = 0.25,
@@ -898,222 +1162,15 @@ local function onGameplayInteract()
   end
 end
 
-local function isSplitModeActive()
-  return isSplitActive or (render_splitScreen and render_splitScreen.isEnabled and render_splitScreen.isEnabled())
-end
-
-local function selectAtCursor()
-  if not freeroam_bigMapMode or not freeroam_bigMapMode.bigMapActive() then return end
-
-  -- 1. If a POI is hovered under the crosshair, select it
-  if freeroam_bigMapMode.hoveredPoiId then
-    if freeroam_bigMapMode.selectPoi then
-      freeroam_bigMapMode.selectPoi(freeroam_bigMapMode.hoveredPoiId)
-      Engine.Audio.playOnce('AudioGui', 'event:>UI>Main>select')
-      return
-    end
-  end
-
-  -- 2. If a POI is currently selected, deselect it
-  if freeroam_bigMapMode.selectedPoiId then
-    if freeroam_bigMapMode.deselect then
-      freeroam_bigMapMode.deselect()
-      return
-    end
-  end
-
-  -- 3. Raycast down from the center crosshair
-  local camDir = core_camera.getQuat() * vec3(0, 1, 0)
-  local ray = {pos = core_camera.getPosition(), dir = camDir}
-  local hitDist = castRayStatic(ray.pos, ray.dir, 50000)
-  if hitDist < 50000 then
-    local hitPos = ray.pos + ray.dir * hitDist
-    local currentTarget = (core_groundMarkers and core_groundMarkers.getTargetPlayer and core_groundMarkers.getTargetPlayer()) or 0
-    if core_groundMarkers and core_groundMarkers.currentlyHasTarget and core_groundMarkers.currentlyHasTarget(currentTarget) then
-      freeroam_bigMapMode.setNavFocus(nil)
-    else
-      freeroam_bigMapMode.setNavFocus(hitPos)
-      Engine.Audio.playOnce('AudioGui', 'event:>UI>Main>Click_Tonal_01')
-    end
-  end
-end
-
-local function bindBigMapSelectKeys()
-  local am = scenetree.findObject("BigMapActionMap")
-  if am and core_input_actions and core_input_actions.actionToCommands then
-    local success, actionMap, actsOnChange, onChange, actsOnDown, onDown, actsOnUp, onUp, isRelative, ctx, isCentered = core_input_actions.actionToCommands("bigMapControllerSelect")
-    local jsonFfb = jsonEncode({updateType = 0})
-    for devname, _ in pairs(core_input_bindings.devices or {}) do
-      if string.find(devname, "keyboard") then
-        pcall(function()
-          am:bind(devname, "bigMapControllerSelect", "return", isCentered, 0, 0, 1, 0, 0, false, false, false, false, 0, 0, 0, jsonFfb, actsOnChange, onChange, actsOnDown, onDown, actsOnUp, onUp, 0, isRelative, 0, ctx)
-          am:bind(devname, "bigMapControllerSelect", "enter", isCentered, 0, 0, 1, 0, 0, false, false, false, false, 0, 0, 0, jsonFfb, actsOnChange, onChange, actsOnDown, onDown, actsOnUp, onUp, 0, isRelative, 0, ctx)
-          am:bind(devname, "bigMapControllerSelect", "numpadenter", isCentered, 0, 0, 1, 0, 0, false, false, false, false, 0, 0, 0, jsonFfb, actsOnChange, onChange, actsOnDown, onDown, actsOnUp, onUp, 0, isRelative, 0, ctx)
-          am:bind(devname, "bigMapControllerSelect", "space", isCentered, 0, 0, 1, 0, 0, false, false, false, false, 0, 0, 0, jsonFfb, actsOnChange, onChange, actsOnDown, onDown, actsOnUp, onUp, 0, isRelative, 0, ctx)
-        end)
-      end
-    end
-  end
-end
-
-local function hookBigMapMode()
-  if freeroam_bigMapMode and not freeroam_bigMapMode._careerSplitHooked then
-    freeroam_bigMapMode._careerSplitHooked = true
-
-    -- Hook camMode.onMouseButton: in split-screen mode, left click should not drag or pan the map
-    local camMode = core_camera and core_camera.getGlobalCameras and core_camera.getGlobalCameras()["bigMap"]
-    if camMode and not camMode._careerSplitHooked then
-      camMode._careerSplitHooked = true
-      local origCamOnMouseButton = camMode.onMouseButton
-      camMode.onMouseButton = function(self, buttonDown, mouseDragging, ...)
-        if isSplitModeActive() then
-          -- In split-screen: left click should not drag or pan the map
-          return
-        end
-        if origCamOnMouseButton then
-          return origCamOnMouseButton(self, buttonDown, mouseDragging, ...)
-        end
-      end
-    end
-
-    local origToggleBigMap = freeroam_bigMapMode.toggleBigMap
-    freeroam_bigMapMode.toggleBigMap = function(...)
-      if isSplitModeActive() then
-        if freeroam_bigMapMode.bigMapActive() then
-          freeroam_bigMapMode.exitBigMap(true, true)
-          return
-        else
-          freeroam_bigMapMode.enterBigMap({instant = true, forceOpen = true})
-          return
-        end
-      end
-      if origToggleBigMap then
-        return origToggleBigMap(...)
-      end
-    end
-
-    local origEnterBigMap = freeroam_bigMapMode.enterBigMap
-    freeroam_bigMapMode.enterBigMap = function(options, ...)
-      options = options or {}
-      if isSplitModeActive() then
-        options.instant = true
-        options.forceOpen = true
-      end
-      if origEnterBigMap then
-        local res = origEnterBigMap(options, ...)
-        if isSplitModeActive() then
-          bindBigMapSelectKeys()
-        end
-        return res
-      end
-    end
-
-    local origExitBigMap = freeroam_bigMapMode.exitBigMap
-    freeroam_bigMapMode.exitBigMap = function(instant, closeEscMenu, forceGameCam, ...)
-      if isSplitModeActive() then
-        instant = true
-      end
-      if origExitBigMap then
-        return origExitBigMap(instant, closeEscMenu, forceGameCam, ...)
-      end
-    end
-
-    -- Hook onCameraPreRender: crosshair is always visible ONLY in split-screen mode
-    local origOnCameraPreRender = freeroam_bigMapMode.onCameraPreRender
-    freeroam_bigMapMode.onCameraPreRender = function(camData, ...)
-      if origOnCameraPreRender then
-        origOnCameraPreRender(camData, ...)
-      end
-      if isSplitModeActive() and freeroam_bigMapMode.bigMapActive() then
-        local iconRenderer = gameplay_playmodeMarkers and gameplay_playmodeMarkers.getBigmapRendererObj and gameplay_playmodeMarkers.getBigmapRendererObj()
-        if iconRenderer then
-          local crosshair = iconRenderer:getIconByName("controllerCrosshair")
-          if crosshair then
-            crosshair.color = ColorI(255, 255, 255, 255)
-          end
-        end
-      end
-    end
-
-    -- Hook onMouseButton: in split-screen mode, mouse left click sets route or selects POI without dragging the map
-    local origOnMouseButton = freeroam_bigMapMode.onMouseButton
-    freeroam_bigMapMode.onMouseButton = function(buttonDown, ...)
-      if isSplitModeActive() and freeroam_bigMapMode.bigMapActive() then
-        -- Check if mouse click is on our ImGui Top Bar (Route For: P1, P2)
-        local im = ui_imgui
-        if im and im.GetMousePos then
-          local mPos = im.GetMousePos()
-          local canvas = scenetree.findObject("Canvas")
-          local winW = 1920
-          if canvas and canvas.getWindowClientSizeXY then
-            winW = canvas:getWindowClientSizeXY()
-          end
-          local barW = 540
-          local minX = (winW - barW) * 0.5
-          local maxX = (winW + barW) * 0.5
-          if mPos and mPos.x >= minX and mPos.x <= maxX and mPos.y >= 0 and mPos.y <= 75 then
-            -- Click is inside the Top Bar; let ImGui handle it exclusively
-            return
-          end
-        end
-
-        local cMode = core_camera and core_camera.getGlobalCameras and core_camera.getGlobalCameras()["bigMap"]
-        if cMode and cMode.onMouseButton then
-          cMode:onMouseButton(false, false)
-        end
-
-        if not buttonDown then
-          -- Left mouse release: set route or select hovered POI without map drag
-          if freeroam_bigMapMode.hoveredPoiId then
-            if freeroam_bigMapMode.selectPoi then
-              freeroam_bigMapMode.selectPoi(freeroam_bigMapMode.hoveredPoiId)
-              Engine.Audio.playOnce('AudioGui', 'event:>UI>Main>select')
-              return
-            end
-          end
-
-          local ray = getCameraMouseRay()
-          if ray then
-            local hitDist = castRayStatic(ray.pos, ray.dir, 50000)
-            if hitDist < 50000 then
-              local hitPos = ray.pos + ray.dir * hitDist
-              local currentTarget = (core_groundMarkers and core_groundMarkers.getTargetPlayer and core_groundMarkers.getTargetPlayer()) or 0
-              if core_groundMarkers and core_groundMarkers.currentlyHasTarget and core_groundMarkers.currentlyHasTarget(currentTarget) then
-                freeroam_bigMapMode.setNavFocus(nil)
-              else
-                freeroam_bigMapMode.setNavFocus(hitPos)
-                Engine.Audio.playOnce('AudioGui', 'event:>UI>Main>Click_Tonal_01')
-              end
-              return
-            end
-          end
-        end
-        return
-      end
-
-      if origOnMouseButton then
-        return origOnMouseButton(buttonDown, ...)
-      end
-    end
-
-    -- Hook onControllerSelect: sets route or selects POI under the center crosshair
-    local origOnControllerSelect = freeroam_bigMapMode.onControllerSelect
-    freeroam_bigMapMode.onControllerSelect = function(...)
-      if isSplitModeActive() and freeroam_bigMapMode.bigMapActive() then
-        selectAtCursor()
-        return
-      end
-
-      if origOnControllerSelect then
-        return origOnControllerSelect(...)
-      end
-    end
-
-    log("I", "careerSplitScreen", "Hooked freeroam_bigMapMode: split-screen controller crosshair and drag-free route clicks.")
-  end
-end
-
 local function onPreRender(dt)
+  if freeroam_bigMapMode and not freeroam_bigMapMode._careerSplitHooked then
+    hookBigMapMode()
+  end
+  if (gameplay_markerInteraction and not gameplay_markerInteraction._careerSplitMarkerHooked)
+     or (overhaul_integration_services_markerInteraction and not overhaul_integration_services_markerInteraction._careerSplitMarkerHooked) then
+    hookMarkerInteraction()
+  end
+
   if freeroam_bigMapMode and freeroam_bigMapMode.bigMapActive() then
     if isSplitModeActive() then
       -- Guarantee the crosshair icon stays white and visible in split screen
@@ -1142,6 +1199,7 @@ end
 local function onExtensionLoaded()
   setExtensionUnloadMode(M, "manual")
   hookBigMapMode()
+  hookMarkerInteraction()
   log("I", "careerSplitScreen", "Career Split-Screen extension initialized.")
 end
 
