@@ -1208,6 +1208,7 @@ local function drawInteractPromptForPlayer(player, prompt, rect, canvasPosX, can
 end
 
 local function drawPlayerInteractPrompts()
+  if careerSplitScreen and careerSplitScreen.drawPlayerInteractPrompts then return end
   if not render_splitScreen then return end
   local uiState = render_splitScreen.getUiState and render_splitScreen.getUiState()
   if not uiState or not uiState.layout or not uiState.players or #uiState.players <= 1 then return end

@@ -776,15 +776,25 @@ end
 M.getCurrent = function()
   local entry = NavigationState.getCurrentEntry()
   if entry and entry.resolved and entry.resolved.name == "multiseat" then
-    local isCareer = (career_career and career_career.isActive and career_career.isActive())
-      or (overhaul_career_career and overhaul_career_career.isActive and overhaul_career_career.isActive())
-      or (core_gamestate and core_gamestate.state and (core_gamestate.state.state == "career" or core_gamestate.state.state == "overhaul"))
-    if isCareer then
-      local copy = shallowcopy(entry)
-      copy.resolved = shallowcopy(entry.resolved)
-      copy.resolved.name = "play"
-      return copy
-    end
+    return {
+      request = {
+        name = "play",
+        fullRoute = "play",
+        params = (entry.request and entry.request.params) or {},
+        query = (entry.request and entry.request.query) or {},
+        options = (entry.request and entry.request.options) or {},
+      },
+      resolved = {
+        name = "play",
+        screenId = "play",
+        params = (entry.resolved and entry.resolved.params) or {},
+        query = (entry.resolved and entry.resolved.query) or {},
+        ui = {
+          uiTypes = {"vue", "angular"},
+          uiTypesFilter = "any",
+        },
+      },
+    }
   end
   return entry
 end
@@ -1141,7 +1151,7 @@ end
 
 M.getState = function()
   return {
-    currentRoute = NavigationState.getCurrentEntry(),
+    currentRoute = M.getCurrent(),
     activeScope = activeScopeState,
   }
 end

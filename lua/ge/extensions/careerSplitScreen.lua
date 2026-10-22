@@ -1147,22 +1147,656 @@ local function onGameStateUpdate(gameState)
   end
 end
 
-local function onGameplayInteract()
-  if not isCareerModeActive() then return end
-  if gameplay_markerInteraction and gameplay_markerInteraction.performInteract then
-    if gameplay_markerInteraction.performInteract() then
-      log("I", "careerSplitScreen", "onGameplayInteract: performed prompt action via markerInteraction")
-      return true
+-- ==============================================================================
+-- On-Screen Player Interaction Prompt (Right-Middle Screen)
+-- Displays keycap badge [E] / (A) and activity label (Refuel, Enter Garage, etc.)
+-- for Player 0 and Player 1 in their respective screen viewports.
+-- ==============================================================================
+local playerPrompts = {}
+local clustersById = {}
+local clustersByIdGen = -1
+local pBB1, pBB2, pBB3, pBB4, pBB5, pBB6, pBB7, pBB8 = vec3(), vec3(), vec3(), vec3(), vec3(), vec3(), vec3(), vec3()
+
+local function getBBPoints(bbCenter, bbAxis0, bbAxis1, bbAxis2)
+  pBB1:set(bbCenter) pBB1:setAdd(bbAxis0) pBB1:setAdd(bbAxis1) pBB1:setSub(bbAxis2)
+  pBB2:set(bbCenter) pBB2:setAdd(bbAxis0) pBB2:setAdd(bbAxis1) pBB2:setAdd(bbAxis2)
+  pBB3:set(bbCenter) pBB3:setSub(bbAxis0) pBB3:setAdd(bbAxis1) pBB3:setAdd(bbAxis2)
+  pBB4:set(bbCenter) pBB4:setSub(bbAxis0) pBB4:setAdd(bbAxis1) pBB4:setSub(bbAxis2)
+  pBB5:set(bbCenter) pBB5:setAdd(bbAxis0) pBB5:setSub(bbAxis1) pBB5:setSub(bbAxis2)
+  pBB6:set(bbCenter) pBB6:setAdd(bbAxis0) pBB6:setSub(bbAxis1) pBB6:setAdd(bbAxis2)
+  pBB7:set(bbCenter) pBB7:setSub(bbAxis0) pBB7:setSub(bbAxis1) pBB7:setAdd(bbAxis2)
+  pBB8:set(bbCenter) pBB8:setSub(bbAxis0) pBB8:setSub(bbAxis1) pBB8:setSub(bbAxis2)
+  return {pBB1, pBB2, pBB3, pBB4, pBB5, pBB6, pBB7, pBB8}
+end
+
+local function getClusterById(id)
+  if not id then return nil end
+  local gen = (gameplay_rawPois and gameplay_rawPois.getRawPoiGeneration and gameplay_rawPois.getRawPoiGeneration()) or 0
+  if clustersByIdGen ~= gen or not clustersById[id] then
+    table.clear(clustersById)
+    clustersByIdGen = gen
+    if gameplay_playmodeMarkers and gameplay_playmodeMarkers.getPlaymodeClusters then
+      local ok, clusters = pcall(gameplay_playmodeMarkers.getPlaymodeClusters)
+      if ok and clusters and type(clusters) == "table" then
+        for _, c in ipairs(clusters) do
+          if c and c.id then
+            clustersById[c.id] = c
+          end
+        end
+      end
     end
   end
-  if ui_missionInfo and ui_missionInfo.buttonsTable and #ui_missionInfo.buttonsTable > 0 then
-    log("I", "careerSplitScreen", "onGameplayInteract: activating prompt action 1")
-    ui_missionInfo.performActivityAction(1)
-    return true
+  return clustersById[id]
+end
+
+local function isPlayerActuallyInsideMarker(marker, pData)
+  if not marker or not pData then return false end
+
+  -- 1. Gas station pumps
+  if marker.pumps then
+    if pData.isWalking then return false end
+    for _, pump in ipairs(marker.pumps) do
+      if pump.areaPos and pump.xVec and pump.yVec and pump.zVec and pData.bbCenter and pData.bbHalfAxis0 then
+        if overlapsOBB_OBB and overlapsOBB_OBB(pData.bbCenter, pData.bbHalfAxis0, pData.bbHalfAxis1, pData.bbHalfAxis2, pump.areaPos, pump.xVec, pump.yVec, pump.zVec) then
+          return true
+        end
+      end
+      if pump.iconPos and pData.vehPos and pData.vehPos:distance(pump.iconPos) <= 5.0 then
+        return true
+      end
+      if pump.areaPos and pData.vehPos and pData.vehPos:distance(pump.areaPos) <= 5.0 then
+        return true
+      end
+    end
+    return false
+  end
+
+  -- 2. walkingMarker (doors / dealership / garage computer)
+  if marker.doors then
+    if not pData.isWalking then return false end
+    for _, area in ipairs(marker.doors) do
+      if area.areaPos and area.xVec and area.yVec and area.zVec and pData.bbCenter and pData.bbHalfAxis0 then
+        if overlapsOBB_OBB and overlapsOBB_OBB(pData.bbCenter, pData.bbHalfAxis0, pData.bbHalfAxis1, pData.bbHalfAxis2, area.areaPos, area.xVec, area.yVec, area.zVec) then
+          return true
+        end
+      end
+      if area.iconPos and pData.vehPos and pData.vehPos:distance(area.iconPos) <= 3.0 then
+        return true
+      end
+      if area.areaPos and pData.vehPos and pData.vehPos:distance(area.areaPos) <= 3.0 then
+        return true
+      end
+    end
+    return false
+  end
+
+  -- 3. parkingMarker (parking spots, garage deliveries, dealerships, mod shops)
+  if marker.checkParking then
+    if pData.isWalking then return false end
+    if type(marker.checkParking) == "function" then
+      pcall(function() marker:checkParking(pData) end)
+      if marker.parked or marker.overlap then return true end
+    end
+    if marker.pos and pData.vehPos then
+      local dist = pData.vehPos:distance(marker.pos)
+      if dist <= 4.0 then return true end
+      if dist <= (marker.radius or 12) and marker.xVec and marker.yVec and marker.zVec and pData.bbCenter and pData.bbHalfAxis0 then
+        if marker.mode == "contained" and containsOBB_OBB then
+          if containsOBB_OBB(marker.pos, marker.xVec, marker.yVec, marker.zVec, pData.bbCenter, pData.bbHalfAxis0, pData.bbHalfAxis1, pData.bbHalfAxis2) then
+            return true
+          end
+        end
+        if overlapsOBB_OBB and overlapsOBB_OBB(marker.pos, marker.xVec, marker.yVec, marker.zVec, pData.bbCenter, pData.bbHalfAxis0, pData.bbHalfAxis1, pData.bbHalfAxis2) then
+          return true
+        end
+      end
+    end
+    return false
+  end
+
+  -- 4. missionMarker
+  if marker.playerIsInArea then
+    local ok, inArea = pcall(function() return marker:playerIsInArea(pData) end)
+    if ok and inArea then return true end
+  end
+
+  -- 5. zoneMarker
+  if marker.zones then
+    if pData.isWalking then return false end
+    for _, z in ipairs(marker.zones) do
+      if z and z.containsPoint2D then
+        if pData.bbPoints and pData.bbPoints[1] and z:containsPoint2D(pData.bbPoints[1]) then return true end
+        if pData.vehPos and z:containsPoint2D(pData.vehPos) then return true end
+      end
+    end
+    return false
+  end
+
+  -- 6. Generic trigger with pos/radius
+  if marker.pos and pData.vehPos then
+    local r = marker.radius or 5.0
+    if pData.vehPos:distance(marker.pos) <= r then return true end
+  end
+
+  if marker.cluster and marker.cluster.pos and pData.vehPos then
+    local r = marker.cluster.radius or 5.0
+    if pData.vehPos:distance(marker.cluster.pos) <= r then return true end
+  end
+
+  return false
+end
+
+local function getPlayerDataForInteraction(pIdx, dtSim)
+  local playerVehicle = getPlayerVehicle(pIdx)
+  if not playerVehicle then return nil end
+
+  local pData = {
+    playerIndex = pIdx,
+    veh = playerVehicle,
+    vehPos = vec3(playerVehicle:getPositionXYZ()),
+    vehPos2d = vec3(playerVehicle:getPositionXYZ()),
+    vehVelocity = vec3(playerVehicle:getVelocityXYZ()),
+  }
+  pData.vehPos2d.z = 0
+
+  local vehId = playerVehicle:getID()
+  pData.bbCenter = vec3(be:getObjectOOBBCenterXYZ(vehId))
+  pData.bbHalfAxis0 = vec3(be:getObjectOOBBHalfAxisXYZ(vehId, 0))
+  pData.bbHalfAxis1 = vec3(be:getObjectOOBBHalfAxisXYZ(vehId, 1))
+  pData.bbHalfAxis2 = vec3(be:getObjectOOBBHalfAxisXYZ(vehId, 2))
+  pData.bbPoints = getBBPoints(pData.bbCenter, pData.bbHalfAxis0, pData.bbHalfAxis1, pData.bbHalfAxis2)
+
+  local isWalking = (playerVehicle.getJBeamFilename and playerVehicle:getJBeamFilename() == "unicycle")
+    or (gameplay_walk and gameplay_walk.isWalking and gameplay_walk.isWalking(pIdx)) or false
+  pData.isWalking = isWalking
+
+  local speed = (playerVehicle.getVelocity and playerVehicle:getVelocity():len()) or 0
+  pData.canInteract = isWalking or (speed <= 2.2)
+  pData.playerPosition = pData.vehPos
+  pData.dt = dtSim or 0
+  pData.cruisingSpeedFactor = 0
+  pData.parkingSpeedFactor = 1
+  pData.camPos = pData.vehPos
+  return pData
+end
+
+local function sortActivityData(a, b)
+  local hasSortingA = a.sorting ~= nil
+  local hasSortingB = b.sorting ~= nil
+  if hasSortingA and not hasSortingB then return true
+  elseif not hasSortingA and hasSortingB then return false
+  elseif hasSortingA and hasSortingB then
+    if a.sorting.type == "mission" and b.sorting.type ~= "mission" then return true
+    elseif a.sorting.type ~= "mission" and b.sorting.type == "mission" then return false
+    elseif a.sorting.type ~= b.sorting.type then return a.sorting.type < b.sorting.type
+    else
+      if (a.sorting.order or 0) == (b.sorting.order or 0) then
+        return (a.sorting.id or a.heading) < (b.sorting.id or b.heading)
+      end
+      return (a.sorting.order or 0) < (b.sorting.order or 0)
+    end
+  else
+    return (a.heading or "") < (b.heading or "")
   end
 end
 
+local function getAssignedDeviceForPlayer(playerIndex)
+  if core_multiseat and core_multiseat.getDevicesByPlayer then
+    local ok, pDevices = pcall(core_multiseat.getDevicesByPlayer)
+    if ok and pDevices and pDevices[playerIndex] and #pDevices[playerIndex] > 0 then
+      for _, dev in ipairs(pDevices[playerIndex]) do
+        if dev.id and dev.connected ~= false then
+          return dev.id
+        end
+      end
+    end
+  end
+
+  if core_input_bindings and core_input_bindings.getAssignedPlayers then
+    local ok, assigned = pcall(core_input_bindings.getAssignedPlayers)
+    if ok and assigned and type(assigned) == "table" then
+      for devname, p in pairs(assigned) do
+        if p == playerIndex then
+          return devname
+        end
+      end
+    end
+  end
+
+  return nil
+end
+
+local function formatBindingControl(rawControl, devType)
+  if not rawControl or rawControl == "" then return nil end
+
+  local parts = {}
+  for part in string.gmatch(rawControl, "%S+") do
+    table.insert(parts, part)
+  end
+
+  local displayParts = {}
+  for _, p in ipairs(parts) do
+    local lp = string.lower(p)
+    if string.find(lp, "^modifier%d*$") then
+      -- Skip internal modifier tokens like modifier1, modifier2
+    elseif lp == "shift" or lp == "lshift" or lp == "rshift" then
+      table.insert(displayParts, "Shift")
+    elseif lp == "ctrl" or lp == "lcontrol" or lp == "rcontrol" or lp == "control" then
+      table.insert(displayParts, "Ctrl")
+    elseif lp == "alt" or lp == "lalt" or lp == "ralt" then
+      table.insert(displayParts, "Alt")
+    elseif lp == "space" then
+      table.insert(displayParts, "Space")
+    elseif lp == "return" or lp == "enter" then
+      table.insert(displayParts, "Enter")
+    elseif lp == "escape" or lp == "esc" then
+      table.insert(displayParts, "Esc")
+    elseif lp == "tab" then
+      table.insert(displayParts, "Tab")
+    elseif lp == "backspace" then
+      table.insert(displayParts, "Backspace")
+    -- Gamepad / Xbox
+    elseif lp == "btn_a" then
+      table.insert(displayParts, "A")
+    elseif lp == "btn_b" then
+      table.insert(displayParts, "B")
+    elseif lp == "btn_x" then
+      table.insert(displayParts, "X")
+    elseif lp == "btn_y" then
+      table.insert(displayParts, "Y")
+    elseif lp == "btn_l" then
+      table.insert(displayParts, "LB")
+    elseif lp == "btn_r" then
+      table.insert(displayParts, "RB")
+    elseif lp == "triggerl" then
+      table.insert(displayParts, "LT")
+    elseif lp == "triggerr" then
+      table.insert(displayParts, "RT")
+    elseif lp == "btn_back" then
+      table.insert(displayParts, "View")
+    elseif lp == "btn_start" then
+      table.insert(displayParts, "Menu")
+    elseif lp == "btn_lt" or lp == "thumbl" then
+      table.insert(displayParts, "LS")
+    elseif lp == "btn_rt" or lp == "thumbr" then
+      table.insert(displayParts, "RS")
+    elseif lp == "dpov" then
+      table.insert(displayParts, "D-Down")
+    elseif lp == "upov" then
+      table.insert(displayParts, "D-Up")
+    elseif lp == "lpov" then
+      table.insert(displayParts, "D-Left")
+    elseif lp == "rpov" then
+      table.insert(displayParts, "D-Right")
+    -- PlayStation / DirectInput
+    elseif lp == "button0" then
+      table.insert(displayParts, (devType and string.find(devType, "sce") and "Square") or "X")
+    elseif lp == "button1" then
+      table.insert(displayParts, (devType and string.find(devType, "sce") and "Cross") or "A")
+    elseif lp == "button2" then
+      table.insert(displayParts, (devType and string.find(devType, "sce") and "Circle") or "B")
+    elseif lp == "button3" then
+      table.insert(displayParts, (devType and string.find(devType, "sce") and "Triangle") or "Y")
+    elseif lp == "button4" then
+      table.insert(displayParts, "L1")
+    elseif lp == "button5" then
+      table.insert(displayParts, "R1")
+    elseif lp == "button6" then
+      table.insert(displayParts, "L2")
+    elseif lp == "button7" then
+      table.insert(displayParts, "R2")
+    elseif lp == "button8" then
+      table.insert(displayParts, "Share")
+    elseif lp == "button9" then
+      table.insert(displayParts, "Options")
+    elseif #lp == 1 then
+      table.insert(displayParts, string.upper(lp))
+    else
+      table.insert(displayParts, lp:sub(1,1):upper() .. lp:sub(2))
+    end
+  end
+
+  if #displayParts == 0 then
+    local lastPart = parts[#parts] or rawControl
+    return string.upper(lastPart)
+  end
+
+  return table.concat(displayParts, " + ")
+end
+
+local function getInteractKeyPromptForPlayer(playerIndex)
+  local actionName = "gameplay_interact"
+
+  if core_input_bindings and core_input_bindings.bindings then
+    local assignedDev = getAssignedDeviceForPlayer(playerIndex)
+
+    -- 1. Check explicitly assigned device
+    if assignedDev then
+      for _, devData in ipairs(core_input_bindings.bindings) do
+        if devData.devname == assignedDev then
+          local contents = devData.contents or {}
+          for _, b in ipairs(contents.bindings or {}) do
+            if b.action == actionName and not b.unused and b.control then
+              local formatted = formatBindingControl(b.control, contents.devicetype)
+              if formatted and formatted ~= "" then
+                return formatted
+              end
+            end
+          end
+        end
+      end
+    end
+
+    -- 2. Check player preferred device in bindings
+    for _, devData in ipairs(core_input_bindings.bindings) do
+      local contents = devData.contents or {}
+      local devType = contents.devicetype
+      local isController = (devType ~= "keyboard" and devType ~= "mouse")
+
+      local match = false
+      if playerIndex == 0 then
+        match = true
+      else
+        match = isController
+      end
+
+      if match then
+        for _, b in ipairs(contents.bindings or {}) do
+          if b.action == actionName and not b.unused and b.control then
+            local formatted = formatBindingControl(b.control, devType)
+            if formatted and formatted ~= "" then
+              return formatted
+            end
+          end
+        end
+      end
+    end
+
+    -- 3. Fallback: check all bindings
+    for _, devData in ipairs(core_input_bindings.bindings) do
+      local contents = devData.contents or {}
+      for _, b in ipairs(contents.bindings or {}) do
+        if b.action == actionName and not b.unused and b.control then
+          local formatted = formatBindingControl(b.control, contents.devicetype)
+          if formatted and formatted ~= "" then
+            return formatted
+          end
+        end
+      end
+    end
+  end
+
+  if playerIndex == 0 then
+    return "E"
+  else
+    return "A"
+  end
+end
+
+local function onActivityAcceptUpdate(content)
+  if content and #content > 0 then
+    playerPrompts[0] = content[1]
+    playerPrompts[0].fromMissionInfo = true
+  end
+end
+
+local function onMissionInfoChangedState(fromState, toState, content)
+  if toState == "closed" then
+    if playerPrompts[0] and playerPrompts[0].fromMissionInfo then
+      playerPrompts[0] = nil
+    end
+  elseif toState == "opened" and content and #content > 0 then
+    playerPrompts[0] = content[1]
+    playerPrompts[0].fromMissionInfo = true
+  end
+end
+
+local function evaluatePlayerInteractions(dtSim)
+  if not isSplitModeActive() then
+    if next(playerPrompts) then
+      table.clear(playerPrompts)
+    end
+    return
+  end
+
+  if not gameplay_playmodeMarkers or not gameplay_playmodeMarkers.getPlaymodeClustersAsQuadtree then return end
+  local clusterQt = gameplay_playmodeMarkers.getPlaymodeClustersAsQuadtree()
+  if not clusterQt then return end
+
+  local checkPlayers = {0}
+  local p1Veh = getPlayerVehicle(1)
+  if p1Veh and p1Veh ~= getPlayerVehicle(0) then
+    table.insert(checkPlayers, 1)
+  else
+    playerPrompts[1] = nil
+  end
+
+  for _, pIdx in ipairs(checkPlayers) do
+    local pData = getPlayerDataForInteraction(pIdx, dtSim)
+    if pData and pData.canInteract then
+      local pInteractableElements = {}
+      local searchRadius = 35
+      for id in clusterQt:queryNotNested(pData.vehPos.x - searchRadius, pData.vehPos.y - searchRadius, pData.vehPos.x + searchRadius, pData.vehPos.y + searchRadius) do
+        local cluster = getClusterById(id)
+        if cluster then
+          local marker = gameplay_playmodeMarkers.getMarkerForCluster and gameplay_playmodeMarkers.getMarkerForCluster(cluster)
+          if marker and marker.interactInPlayMode then
+            if isPlayerActuallyInsideMarker(marker, pData) then
+              local savedOverlap = marker.anyOverlap
+              local savedParked = marker.parked
+              marker.anyOverlap = true
+              marker.parked = true
+
+              pcall(function()
+                marker:interactInPlayMode(pData, pInteractableElements)
+              end)
+
+              marker.anyOverlap = savedOverlap
+              marker.parked = savedParked
+            end
+          end
+        end
+      end
+
+      if #pInteractableElements > 0 then
+        local pActivityData = {}
+        pcall(function()
+          extensions.hook("onActivityAcceptGatherData", pInteractableElements, pActivityData)
+        end)
+        table.sort(pActivityData, sortActivityData)
+        if #pActivityData > 0 then
+          playerPrompts[pIdx] = pActivityData[1]
+        else
+          if not (pIdx == 0 and playerPrompts[0] and playerPrompts[0].fromMissionInfo) then
+            playerPrompts[pIdx] = nil
+          end
+        end
+      else
+        if not (pIdx == 0 and playerPrompts[0] and playerPrompts[0].fromMissionInfo) then
+          playerPrompts[pIdx] = nil
+        end
+      end
+    else
+      if not (pIdx == 0 and playerPrompts[0] and playerPrompts[0].fromMissionInfo) then
+        playerPrompts[pIdx] = nil
+      end
+    end
+  end
+end
+
+local function drawInteractPromptForPlayer(player, prompt, rect, canvasPosX, canvasPosY, canvasSizeX, canvasSizeY)
+  local im = ui_imgui
+  if not im then return end
+
+  local cellW = rect[3] * canvasSizeX
+  local cellH = rect[4] * canvasSizeY
+  local cellX = canvasPosX + rect[1] * canvasSizeX
+  local cellY = canvasPosY + rect[2] * canvasSizeY
+
+  local labelText = prompt.heading or "Interact"
+  if prompt.buttonLabel and _tr then
+    local trBtn = _tr(prompt.buttonLabel, prompt.buttonLabel)
+    if trBtn and trBtn ~= "" and trBtn ~= prompt.buttonLabel then
+      if prompt.heading and prompt.heading ~= "" and prompt.heading ~= trBtn then
+        labelText = trBtn .. " - " .. _tr(prompt.heading, prompt.heading)
+      else
+        labelText = trBtn
+      end
+    else
+      labelText = _tr(labelText, labelText)
+    end
+  elseif _tr then
+    labelText = _tr(labelText, labelText)
+  end
+
+  local keyText = getInteractKeyPromptForPlayer(player) or "E"
+
+  local keySize = im.CalcTextSize(keyText)
+  local headingSize = im.CalcTextSize(labelText)
+
+  local boxH = 36
+  local boxW = math.max(160, math.min(keySize.x + headingSize.x + 60, cellW - 40))
+
+  -- Right-middle of player's screen viewport
+  local posX = cellX + cellW - boxW - 24
+  local posY = cellY + (cellH - boxH) * 0.5
+
+  im.SetNextWindowPos(im.ImVec2(posX, posY), im.Cond_Always)
+  im.SetNextWindowSize(im.ImVec2(boxW, boxH), im.Cond_Always)
+
+  if im.GetMainViewport and im.SetNextWindowViewport then
+    local mainVp = im.GetMainViewport()
+    if mainVp and mainVp.ID then
+      im.SetNextWindowViewport(mainVp.ID)
+    end
+  end
+
+  local flags = bit.bor(
+    im.WindowFlags_NoTitleBar,
+    im.WindowFlags_NoResize,
+    im.WindowFlags_NoMove,
+    im.WindowFlags_NoScrollbar,
+    im.WindowFlags_NoCollapse,
+    im.WindowFlags_NoInputs
+  )
+  if im.WindowFlags_NoDocking then
+    flags = bit.bor(flags, im.WindowFlags_NoDocking)
+  end
+
+  -- Clean dark capsule pill styling matching BeamNG prompt style
+  im.PushStyleVar2(im.StyleVar_WindowPadding, im.ImVec2(12, 5))
+  im.PushStyleVar1(im.StyleVar_WindowRounding, boxH * 0.5)
+  im.PushStyleVar1(im.StyleVar_WindowBorderSize, 1)
+  im.PushStyleColor1(im.Col_WindowBg, im.GetColorU322(im.ImVec4(0.10, 0.11, 0.14, 0.92)))
+  im.PushStyleColor1(im.Col_Border, im.GetColorU322(im.ImVec4(0.35, 0.38, 0.44, 0.75)))
+
+  local winTitle = "###SDF_InteractPrompt_" .. tostring(player)
+  if im.Begin(winTitle, nil, flags) then
+    -- Keycap badge container
+    im.PushStyleVar2(im.StyleVar_FramePadding, im.ImVec2(8, 3))
+    im.PushStyleVar1(im.StyleVar_FrameRounding, 4)
+    im.PushStyleVar1(im.StyleVar_FrameBorderSize, 1)
+    im.PushStyleColor1(im.Col_Button, im.GetColorU322(im.ImVec4(0.95, 0.45, 0.10, 0.95))) -- BeamNG Orange
+    im.PushStyleColor1(im.Col_ButtonHovered, im.GetColorU322(im.ImVec4(0.95, 0.45, 0.10, 0.95)))
+    im.PushStyleColor1(im.Col_ButtonActive, im.GetColorU322(im.ImVec4(0.95, 0.45, 0.10, 0.95)))
+    im.PushStyleColor1(im.Col_Border, im.GetColorU322(im.ImVec4(1.0, 0.65, 0.30, 0.85)))
+    im.PushStyleColor1(im.Col_Text, im.GetColorU322(im.ImVec4(1.0, 1.0, 1.0, 1.0)))
+
+    im.Button(keyText)
+
+    im.PopStyleColor(5)
+    im.PopStyleVar(3)
+
+    im.SameLine()
+    im.SetCursorPosY(im.GetCursorPosY() + 3)
+    im.TextColored(im.ImVec4(0.95, 0.96, 0.98, 1.0), labelText)
+  end
+  im.End()
+
+  im.PopStyleColor(2)
+  im.PopStyleVar(3)
+end
+
+local function drawPlayerInteractPrompts()
+  local im = ui_imgui
+  if not im then return end
+  if editor and editor.active then return end
+  if freeroam_bigMapMode and freeroam_bigMapMode.bigMapActive() then return end
+
+  local cur = extensions.ui_router and extensions.ui_router.getCurrent()
+  local rName = cur and (cur.resolved and cur.resolved.name or cur.request and cur.request.name or cur.name)
+  if rName and (rName == "bigmap" or rName == "menu" or rName == "menu.careerPause" or string.find(rName, "^pause") or string.find(rName, "^menu%.")) then
+    return
+  end
+
+  local canvas = scenetree.findObject("Canvas")
+  if not canvas or not canvas.getWindowClientSizeXY then return end
+  local canvasSizeX, canvasSizeY = canvas:getWindowClientSizeXY()
+  if not canvasSizeX or not canvasSizeY or canvasSizeX <= 0 or canvasSizeY <= 0 then return end
+
+  local canvasPosX, canvasPosY = 0, 0
+  if im.GetConfigFlagsViewportsEnable() and canvas.clientToScreenXY then
+    canvasPosX, canvasPosY = canvas:clientToScreenXY(Point2I(0, 0))
+    if not canvasPosX or not canvasPosY then return end
+  end
+
+  if not isSplitModeActive() then return end
+  if not render_splitScreen or not render_splitScreen.getUiState then return end
+  local uiState = render_splitScreen.getUiState()
+  if not uiState or not uiState.layout or not uiState.players or #uiState.players <= 1 then return end
+
+  local pCount = math.min(#uiState.layout, #uiState.players)
+  for pIdx = 1, pCount do
+    local player = uiState.players[pIdx].player
+    local prompt = playerPrompts[player]
+    local rect = uiState.layout[pIdx]
+    if prompt and rect and player ~= nil then
+      drawInteractPromptForPlayer(player, prompt, rect, canvasPosX, canvasPosY, canvasSizeX, canvasSizeY)
+    end
+  end
+end
+
+local function performInteract(targetPlayerIdx)
+  if targetPlayerIdx ~= nil and playerPrompts[targetPlayerIdx] then
+    local prompt = playerPrompts[targetPlayerIdx]
+    if prompt and prompt.buttonFun then
+      prompt.buttonFun()
+      playerPrompts[targetPlayerIdx] = nil
+      return true
+    end
+  end
+
+  if playerPrompts[0] and playerPrompts[0].buttonFun then
+    playerPrompts[0].buttonFun()
+    playerPrompts[0] = nil
+    return true
+  elseif playerPrompts[1] and playerPrompts[1].buttonFun then
+    playerPrompts[1].buttonFun()
+    playerPrompts[1] = nil
+    return true
+  end
+
+  if ui_missionInfo and ui_missionInfo.buttonsTable and #ui_missionInfo.buttonsTable > 0 then
+    ui_missionInfo.performActivityAction(1)
+    return true
+  end
+
+  return false
+end
+
+local function onGameplayInteract()
+  if not isCareerModeActive() and not isSplitModeActive() then return end
+  if performInteract() then
+    log("I", "careerSplitScreen", "onGameplayInteract: performed prompt action")
+    return true
+  end
+  return false
+end
+
 local function onPreRender(dt)
+  evaluatePlayerInteractions(dt)
+  drawPlayerInteractPrompts()
+
   if freeroam_bigMapMode and not freeroam_bigMapMode._careerSplitHooked then
     hookBigMapMode()
   end
@@ -1218,6 +1852,10 @@ M.getP2VehicleId = function() return p2VehicleId end
 M.onExtensionLoaded = onExtensionLoaded
 M.onPreRender = onPreRender
 M.onGameplayInteract = onGameplayInteract
+M.onActivityAcceptUpdate = onActivityAcceptUpdate
+M.onMissionInfoChangedState = onMissionInfoChangedState
+M.performInteract = performInteract
+M.drawPlayerInteractPrompts = drawPlayerInteractPrompts
 M.onClientEndMission = onClientEndMission
 M.onCareerActive = onCareerActive
 M.onOverhaulModeStarted = onOverhaulModeStarted
