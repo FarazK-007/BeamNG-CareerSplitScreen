@@ -1,4 +1,7 @@
 # Packaging & Installation script for Career Mode Split-Screen Co-op Mod
+param(
+    [switch]$DevHotReload
+)
 $ErrorActionPreference = "Stop"
 
 $modSourceDir = "d:\Antigravity\BeamNG mod\CareerSplitScreen"
@@ -53,13 +56,22 @@ if (Test-Path $userModsDir) {
     Write-Host "[!] Warning: Mods directory not found at $userModsDir" -ForegroundColor Yellow
 }
 
-# Deploy loose override files for instant in-game hot-reload (Ctrl+R)
+# Direct override deployment (only when -DevHotReload is specified)
 $currentDir = "C:\Users\gofar\AppData\Local\BeamNG\BeamNG.drive\current"
 if (Test-Path $currentDir) {
-    Write-Host "[+] Deploying direct override Lua files..." -ForegroundColor Cyan
-    $luaSource = Join-Path $modSourceDir "lua"
-    Copy-Item -Path "$luaSource\*" -Destination (Join-Path $currentDir "lua") -Recurse -Force
-    Write-Host "[OK] Direct Lua files synchronized to $currentDir\lua" -ForegroundColor Green
+    if ($DevHotReload) {
+        Write-Host "[+] Deploying direct override Lua files for fast dev hot-reload..." -ForegroundColor Cyan
+        $luaSource = Join-Path $modSourceDir "lua"
+        Copy-Item -Path "$luaSource\*" -Destination (Join-Path $currentDir "lua") -Recurse -Force
+        Write-Host "[OK] Direct Lua files synchronized to $currentDir\lua" -ForegroundColor Green
+    } else {
+        # Clean up legacy loose files so Mod Manager has 100% control over the mod
+        $looseGe = Join-Path $currentDir "lua\ge"
+        if (Test-Path $looseGe) {
+            Remove-Item -Path $looseGe -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "[+] Cleaned up loose dev overrides in $looseGe" -ForegroundColor Yellow
+        }
+    }
 }
 
 Write-Host "=============================================" -ForegroundColor Cyan
