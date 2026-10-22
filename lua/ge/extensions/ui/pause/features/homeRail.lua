@@ -1299,16 +1299,21 @@ local function buildMultiseatActions(context, registerButton)
 
   local isSplitRunning = (careerSplitScreen and careerSplitScreen.isActive and careerSplitScreen.isActive()) or (context and context.isMultiseatActive)
 
-  if (context.mode == "freeroam" or context.mode == "career") and not isSplitRunning then
+  local isCareer = (career_career and career_career.isActive and career_career.isActive())
+    or (overhaul_career_career and overhaul_career_career.isActive and overhaul_career_career.isActive())
+    or (core_gamestate and core_gamestate.state and (core_gamestate.state.state == "career" or core_gamestate.state.state == "overhaul"))
+    or (context.mode == "career" or context.mode == "overhaul")
+
+  if (context.mode == "freeroam" or context.mode == "career" or context.mode == "overhaul") and not isSplitRunning then
     local actions = {}
     table.insert(actions, registerButton({
       id = "home.splitScreen",
-      label = (career_career and career_career.isActive and career_career.isActive()) and "Start Split-Screen" or _tr("ui.multiseat.title"),
+      label = isCareer and "Start Split-Screen" or _tr("ui.multiseat.title"),
       icon = "splitScreen",
       visible = true,
       enabled = true,
     }, function()
-      if career_career and career_career.isActive and career_career.isActive() then
+      if isCareer then
         if careerSplitScreen then
           careerSplitScreen.startSplitScreen()
           return pushRoute("multiseat")
@@ -1320,7 +1325,7 @@ local function buildMultiseatActions(context, registerButton)
     return actions
   end
 
-  if context.mode ~= "multiseatGamemode" and context.mode ~= "freeroam" and context.mode ~= "career" then return {} end
+  if context.mode ~= "multiseatGamemode" and context.mode ~= "freeroam" and context.mode ~= "career" and context.mode ~= "overhaul" then return {} end
   local actions = {}
   extensions.hook("onPauseHomeRailBuildMultiseatActions", actions, context, registerButton)
   return actions

@@ -27,6 +27,12 @@ local fallbackVehicles = {
   {model = "vivace", config = "vehicles/vivace/vivace_110_M.pc"},
 }
 
+local function isCareerModeActive()
+  return (career_career and career_career.isActive and career_career.isActive())
+    or (overhaul_career_career and overhaul_career_career.isActive and overhaul_career_career.isActive())
+    or (core_gamestate and core_gamestate.state and (core_gamestate.state.state == "career" or core_gamestate.state.state == "overhaul"))
+end
+
 local function getValidSuggestedVehicles(vehicles)
   local valid = {}
   if type(vehicles) ~= "table" then return valid end
@@ -1624,7 +1630,7 @@ function M.setPlayerVehicleSelection(player, vehicle)
 end
 
 function M.reconcileFreeroamVehicles(options)
-  if career_career and career_career.isActive and career_career.isActive() then return true end
+  if isCareerModeActive() then return true end
   options = options or {}
   ensurePersonaDefaults()
   local participants = core_multiseat.getJoinedParticipants()
@@ -1707,7 +1713,7 @@ function M.prepareStagedChanges()
   local stagedPlayers = getSortedStates(stagedByPlayer, true)
   if #stagedPlayers == 0 then return {success = false, reason = "no_players"} end
 
-  if career_career and career_career.isActive and career_career.isActive() then
+  if isCareerModeActive() then
     local plan = {
       byPersona = {},
       spawned = {},
@@ -1809,7 +1815,7 @@ function M.finalizeStagedChanges(changes, committedConfig)
     return {success = false, reason = "vehicles_not_prepared"}
   end
 
-  if career_career and career_career.isActive and career_career.isActive() then
+  if isCareerModeActive() then
     preparedCommit = nil
     syncSplitScreenPlayers()
     applyingStagedChanges = false

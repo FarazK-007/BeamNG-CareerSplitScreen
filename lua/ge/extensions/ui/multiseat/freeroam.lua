@@ -22,6 +22,12 @@ local PARKING_CLUSTER_RADIUS = 30
 local active = false
 local reloadRestorePending = false
 
+local function isCareerModeActive()
+  return (career_career and career_career.isActive and career_career.isActive())
+    or (overhaul_career_career and overhaul_career_career.isActive and overhaul_career_career.isActive())
+    or (core_gamestate and core_gamestate.state and (core_gamestate.state.state == "career" or core_gamestate.state.state == "overhaul"))
+end
+
 local function assignSuggestedVehicles(levelName, participants)
   local vehicles = ui_multiseat_multiseatVehicles.getSuggestedVehicles(levelName, #participants)
   for index, participant in ipairs(participants) do
@@ -107,7 +113,7 @@ local function buildLevelSpawnPlan(players)
 end
 
 function M.activate()
-  if career_career and career_career.isActive and career_career.isActive() then
+  if isCareerModeActive() then
     active = false
     return
   end
@@ -166,7 +172,7 @@ function M.openSettings()
 end
 
 function M.onMultiseatSettingsApplied(changeSet, result)
-  if career_career and career_career.isActive and career_career.isActive() then
+  if isCareerModeActive() then
     active = false
     if render_splitScreen and render_splitScreen.refreshLayout then
       render_splitScreen.refreshLayout()
@@ -259,7 +265,7 @@ function M.onMultiseatSettingsClosed()
 end
 
 function M.onPauseHomeRailBuildMultiseatActions(actions, _context, registerButton)
-  if career_career and career_career.isActive and career_career.isActive() then
+  if isCareerModeActive() then
     return -- CareerSplitScreen manages its own split-screen pause buttons in Career mode
   end
   -- these stay available while a gamemode owns the session, so they cannot key off `active`

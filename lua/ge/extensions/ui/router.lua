@@ -776,7 +776,10 @@ end
 M.getCurrent = function()
   local entry = NavigationState.getCurrentEntry()
   if entry and entry.resolved and entry.resolved.name == "multiseat" then
-    if career_career and career_career.isActive and career_career.isActive() then
+    local isCareer = (career_career and career_career.isActive and career_career.isActive())
+      or (overhaul_career_career and overhaul_career_career.isActive and overhaul_career_career.isActive())
+      or (core_gamestate and core_gamestate.state and (core_gamestate.state.state == "career" or core_gamestate.state.state == "overhaul"))
+    if isCareer then
       local copy = shallowcopy(entry)
       copy.resolved = shallowcopy(entry.resolved)
       copy.resolved.name = "play"

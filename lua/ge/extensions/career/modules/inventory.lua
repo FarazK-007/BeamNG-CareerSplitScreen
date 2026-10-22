@@ -53,7 +53,7 @@ local function getClosestGarage(pos)
 end
 
 local function onExtensionLoaded()
-  if not career_career.isActive() then return false end
+  if not career_career or not career_career.isActive or not career_career.isActive() then return false end
 
   -- load from saveslot
   local saveSlot, savePath = career_saveSystem.getCurrentProfile()

@@ -61,8 +61,14 @@ local function resetExposure()
   if localExposure then localExposure:resetAutoexposure() end
 end
 
+local function isCareerModeActive()
+  return (career_career and career_career.isActive and career_career.isActive())
+    or (overhaul_career_career and overhaul_career_career.isActive and overhaul_career_career.isActive())
+    or (core_gamestate and core_gamestate.state and (core_gamestate.state.state == "career" or core_gamestate.state.state == "overhaul"))
+end
+
 local function setActionBlocking(block)
-  if career_career and career_career.isActive and career_career.isActive() then
+  if isCareerModeActive() then
     block = false -- Never block vehicleMenues or radial menu in Career Mode!
   end
   core_input_actionFilter.setGroup(blockedActionsGroup, blockedActions)

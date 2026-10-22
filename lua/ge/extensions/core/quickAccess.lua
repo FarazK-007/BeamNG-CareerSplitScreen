@@ -743,7 +743,10 @@ local function registerSandboxMenus()
     local desc = "ui.radialmenu2.freeroamActions.desc"
     local gotoPath = sandboxDefaultPath
 
-    if career_career.isActive() then
+    local isCareer = (career_career and career_career.isActive and career_career.isActive())
+      or (overhaul_career_career and overhaul_career_career.isActive and overhaul_career_career.isActive())
+      or (core_gamestate and core_gamestate.state and (core_gamestate.state.state == "career" or core_gamestate.state.state == "overhaul"))
+    if isCareer then
       title = "ui.radialmenu2.careerActions"
       icon = "cup"
       desc = "ui.radialmenu2.careerActions.desc"
@@ -1845,7 +1848,7 @@ local function removeEmptyLevels(menuTreeCopy)
   local protectedPaths = {
     [sandboxDefaultPath] = true,
     [playerVehicleDefaultPath] = true,
-    [careerDefaultPath] = career_career.isActive(),
+    [careerDefaultPath] = ((career_career and career_career.isActive and career_career.isActive()) or (overhaul_career_career and overhaul_career_career.isActive and overhaul_career_career.isActive()) or (core_gamestate and core_gamestate.state and (core_gamestate.state.state == "career" or core_gamestate.state.state == "overhaul"))) and true or false,
     [missionDefaultPath] = gameplay_missions_missionManager.getForegroundMissionId() ~= nil,
   }
   --for _, path in pairs(favoriteActionsPaths) do

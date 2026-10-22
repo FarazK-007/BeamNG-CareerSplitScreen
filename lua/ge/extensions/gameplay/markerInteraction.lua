@@ -68,6 +68,12 @@ end
 
 local currentInteractableElements = {}
 
+local function isCareerModeActive()
+  return (career_career and career_career.isActive and career_career.isActive())
+    or (overhaul_career_career and overhaul_career_career.isActive and overhaul_career_career.isActive())
+    or (core_gamestate and core_gamestate.state and (core_gamestate.state.state == "career" or core_gamestate.state.state == "overhaul"))
+end
+
 local function getCurrentInteractableElements()
   return currentInteractableElements
 end
@@ -88,7 +94,7 @@ M.formatMission = function(m)
     unlocks = gameplay_missions_unlocks.constructUnlocksField(m),
     hasUserSettingsUnlocked = gameplay_missions_progress.missionHasUserSettingsUnlocked(m.id),
     devMission = m.devMission,
-    tutorialActive = (career_career.isActive() and career_modules_tutorial.isActive()) or nil,
+    tutorialActive = (career_career and career_career.isActive and career_career.isActive() and career_modules_tutorial and career_modules_tutorial.isActive and career_modules_tutorial.isActive()) or nil,
   }
 
   info.hasUserSettings = #info.userSettings > 0
@@ -642,7 +648,7 @@ local function displayMissionMarkers(level, dtSim, dtReal)
     and core_multiseat.isMultiseatActive
     and core_multiseat.isMultiseatActive()
     or false
-  if career_career and career_career.isActive and career_career.isActive() then
+  if isCareerModeActive() then
     multiseatActive = false -- Keep full marker interactions in Career mode!
   end
   if multiseatActive then
@@ -667,7 +673,7 @@ local function displayMissionMarkers(level, dtSim, dtReal)
   end
   local p0Veh = getPlayerVehicle(0)
   local p1Veh = nil
-  if career_career and career_career.isActive and career_career.isActive() then
+  if isCareerModeActive() then
     p1Veh = getPlayerVehicle(1)
   end
 
@@ -822,7 +828,7 @@ local function displayMissionMarkers(level, dtSim, dtReal)
       nearbyIds[id] = true
     end
 
-    if career_career and career_career.isActive and career_career.isActive() then
+    if isCareerModeActive() then
       local p1Veh = getPlayerVehicle(1)
       if p1Veh and p1Veh ~= veh then
         local p1Pos = p1Veh:getPosition()
@@ -857,7 +863,7 @@ local function displayMissionMarkers(level, dtSim, dtReal)
   table.clear(decals)
 
   local decalCount = 0
-  local careerActive = (career_career and career_career.isActive())
+  local careerActive = isCareerModeActive()
   local tutorialActive = gameplay_discover_freeroamTutorial_tutorial ~= nil
   table.clear(interactableElements)
   local showMissionMarkers = markersVisibleTemporary
@@ -994,7 +1000,7 @@ end
 
 local function reachedTarget()
   if not core_groundMarkers.clearPathOnReachingTarget then return end
-  if settings.getValue("showMissionMarkers") or (career_career and career_career.isActive()) then
+  if settings.getValue("showMissionMarkers") or isCareerModeActive() then
     resetForceVisible()
   end
   M.reachedTargetPos = core_groundMarkers.endWP[1]

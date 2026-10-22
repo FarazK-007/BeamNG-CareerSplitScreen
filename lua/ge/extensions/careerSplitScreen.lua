@@ -17,6 +17,35 @@ local p2IsWalking = false
 local guestVehicleId = nil
 local quickAccessInitialized = false
 
+-- Universal Career Mode detection supporting Vanilla Career and RLS Career Overhaul
+local function isCareerModeActive()
+  if career_career and career_career.isActive and career_career.isActive() then
+    return true
+  end
+  if overhaul_career_career and overhaul_career_career.isActive and overhaul_career_career.isActive() then
+    return true
+  end
+  if overhaul_shell_gameMode and overhaul_shell_gameMode.isActive and overhaul_shell_gameMode.isActive() then
+    return true
+  end
+  local state = core_gamestate and core_gamestate.state and core_gamestate.state.state
+  if state == "career" or state == "overhaul" then
+    return true
+  end
+  return false
+end
+
+-- Universal Inventory resolver (Vanilla career_modules_inventory or RLS overhaul_career_garage_inventory)
+local function getInventoryModule()
+  if overhaul_career_garage_inventory then
+    return overhaul_career_garage_inventory
+  end
+  if career_modules_inventory then
+    return career_modules_inventory
+  end
+  return nil
+end
+
 local function isActive()
   return isSplitActive
 end
@@ -53,9 +82,10 @@ end
 
 -- Look for an owned vehicle or spawn a guest vehicle
 local function findOrSpawnP2Vehicle(callback, preferredInvId)
-  local currentInvId = career_modules_inventory and career_modules_inventory.getCurrentVehicle()
-  local invMap = career_modules_inventory and career_modules_inventory.getMapInventoryIdToVehId() or {}
-  local vehicles = career_modules_inventory and career_modules_inventory.getVehicles() or {}
+  local inv = getInventoryModule()
+  local currentInvId = inv and inv.getCurrentVehicle and inv.getCurrentVehicle()
+  local invMap = inv and inv.getMapInventoryIdToVehId and inv.getMapInventoryIdToVehId() or {}
+  local vehicles = inv and inv.getVehicles and inv.getVehicles() or {}
 
   -- 1. Try preferred inventory vehicle if requested
   if preferredInvId and vehicles[preferredInvId] and preferredInvId ~= currentInvId then
@@ -66,10 +96,16 @@ local function findOrSpawnP2Vehicle(callback, preferredInvId)
         return
       end
     else
-      career_modules_inventory.spawnVehicle(preferredInvId, nil, function(spawnedVeh)
-        callback(spawnedVeh, preferredInvId, false)
-      end)
-      return
+      if inv and inv.spawnVehicle then
+        inv.spawnVehicle(preferredInvId, nil, function(spawnedVeh)
+          if not spawnedVeh and inv.getVehicleIdFromInventoryId then
+            local vId = inv.getVehicleIdFromInventoryId(preferredInvId)
+            if vId then spawnedVeh = getObjectByID(vId) end
+          end
+          callback(spawnedVeh, preferredInvId, false)
+        end)
+        return
+      end
     end
   end
 
@@ -87,10 +123,16 @@ local function findOrSpawnP2Vehicle(callback, preferredInvId)
   -- 3. Check if an owned vehicle exists in inventory that is not yet spawned
   for invId, vehData in pairs(vehicles) do
     if invId ~= currentInvId and not invMap[invId] then
-      career_modules_inventory.spawnVehicle(invId, nil, function(spawnedVeh)
-        callback(spawnedVeh, invId, false)
-      end)
-      return
+      if inv and inv.spawnVehicle then
+        inv.spawnVehicle(invId, nil, function(spawnedVeh)
+          if not spawnedVeh and inv.getVehicleIdFromInventoryId then
+            local vId = inv.getVehicleIdFromInventoryId(invId)
+            if vId then spawnedVeh = getObjectByID(vId) end
+          end
+          callback(spawnedVeh, invId, false)
+        end)
+        return
+      end
     end
   end
 
@@ -141,7 +183,7 @@ local function startSplitScreen()
     return
   end
 
-  if not career_career or not career_career.isActive() then
+  if not isCareerModeActive() then
     guihooks.trigger("toastrMsg", {
       type = "warning",
       title = "Career Split-Screen",
@@ -479,8 +521,9 @@ end
 
 local function switchP2Vehicle()
   if not isSplitActive then return end
-  local currentInvId = career_modules_inventory and career_modules_inventory.getCurrentVehicle()
-  local vehicles = career_modules_inventory and career_modules_inventory.getVehicles() or {}
+  local inv = getInventoryModule()
+  local currentInvId = inv and inv.getCurrentVehicle and inv.getCurrentVehicle()
+  local vehicles = inv and inv.getVehicles and inv.getVehicles() or {}
 
   local candidates = {}
   for invId, _ in pairs(vehicles) do
@@ -534,7 +577,7 @@ local function switchP2Vehicle()
       positionP2NearP1(p1Veh, newVeh, false)
       be:enterVehicle(1, newVeh)
       if core_camera then core_camera.resetCamera(1) end
-      local name = (invId and career_modules_inventory.getVehicleNiceNameTranslated and career_modules_inventory.getVehicleNiceNameTranslated(invId)) or (isGuest and "Guest Vehicle" or "Vehicle")
+      local name = (invId and inv and inv.getVehicleNiceNameTranslated and inv.getVehicleNiceNameTranslated(invId)) or (isGuest and "Guest Vehicle" or "Vehicle")
       guihooks.trigger("toastrMsg", {
         type = "info",
         title = "Career Split-Screen",
@@ -633,7 +676,7 @@ end
 
 -- Radial menu integration: Places items cleanly at the exact bottom (Slot 7, 6 o'clock)
 local function onBeforeRadialOpened()
-  if not career_career or not career_career.isActive() then return end
+  if not isCareerModeActive() then return end
   if quickAccessInitialized then return end
   quickAccessInitialized = true
 
@@ -642,7 +685,7 @@ local function onBeforeRadialOpened()
       level = "/root/",
       uniqueID = "careerSplitRootGenerator",
       generator = function(entries)
-        if not career_career or not career_career.isActive() then return end
+        if not isCareerModeActive() then return end
 
         -- Remove the empty root_down dynamic slot and any stale split entries so Slot 7 (6 o'clock) is free
         for i = #entries, 1, -1 do
@@ -821,8 +864,27 @@ local function onCareerActive(active)
   quickAccessInitialized = false
 end
 
+local function onOverhaulModeStarted(saveName)
+  quickAccessInitialized = false
+end
+
+local function onOverhaulModeStopped()
+  if isSplitActive then
+    stopSplitScreen()
+  end
+  quickAccessInitialized = false
+end
+
+local function onGameStateUpdate(gameState)
+  if gameState and (gameState.state == "career" or gameState.state == "overhaul") then
+    quickAccessInitialized = false
+  elseif gameState and gameState.state == "freeroam" and isSplitActive then
+    stopSplitScreen()
+  end
+end
+
 local function onGameplayInteract()
-  if not career_career or not career_career.isActive() then return end
+  if not isCareerModeActive() then return end
   if gameplay_markerInteraction and gameplay_markerInteraction.performInteract then
     if gameplay_markerInteraction.performInteract() then
       log("I", "careerSplitScreen", "onGameplayInteract: performed prompt action via markerInteraction")
@@ -1100,6 +1162,11 @@ M.onPreRender = onPreRender
 M.onGameplayInteract = onGameplayInteract
 M.onClientEndMission = onClientEndMission
 M.onCareerActive = onCareerActive
+M.onOverhaulModeStarted = onOverhaulModeStarted
+M.onOverhaulModeStopped = onOverhaulModeStopped
+M.onGameStateUpdate = onGameStateUpdate
+M.isCareerModeActive = isCareerModeActive
+M.getInventoryModule = getInventoryModule
 M.onBeforeRadialOpened = onBeforeRadialOpened
 M.onAnyMissionChanged = onAnyMissionChanged
 M.onPauseHomeRailBuildMultiseatActions = onPauseHomeRailBuildMultiseatActions

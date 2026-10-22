@@ -14,8 +14,14 @@ local function clear()
   log("D","","Raw Poi Lists Cleared. New Generation: " .. rawPoiGeneration)
 end
 
+local function isCareerModeActive()
+  return (career_career and career_career.isActive and career_career.isActive())
+    or (overhaul_career_career and overhaul_career_career.isActive and overhaul_career_career.isActive())
+    or (core_gamestate and core_gamestate.state and (core_gamestate.state.state == "career" or core_gamestate.state.state == "overhaul"))
+end
+
 local function isMultiseatActive()
-  if career_career and career_career.isActive and career_career.isActive() then
+  if isCareerModeActive() then
     return false -- Never filter out Career POIs during career mode!
   end
   return core_multiseat
@@ -91,7 +97,7 @@ local function getRawPoiListByLevel(levelIdentifier)
   end
 
   -- when in the tutorial, only add the desired elements
-  if career_career.isActive()  and levelIdentifier == "west_coast_usa" then
+  if career_career and career_career.isActive and career_career.isActive() and levelIdentifier == "west_coast_usa" then
 
 
     if career_modules_tutorial.isActive() then

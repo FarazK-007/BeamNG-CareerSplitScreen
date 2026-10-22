@@ -28,6 +28,12 @@ local mockPlatformDeviceGroupIds = {}
 local nextMockPlatformDeviceGroupId = 1
 local lastAssignmentSignature = ""
 local joinedPlayers = {}
+
+local function isCareerModeActive()
+  return (career_career and career_career.isActive and career_career.isActive())
+    or (overhaul_career_career and overhaul_career_career.isActive and overhaul_career_career.isActive())
+    or (core_gamestate and core_gamestate.state and (core_gamestate.state.state == "career" or core_gamestate.state.state == "overhaul"))
+end
 local joinedByPlayer = {}
 local personaOptInMode = false
 local participantRevision = 0
@@ -80,7 +86,7 @@ local function updateActivePlayers(devices, assignedPlayers)
   if multiseatActive then
     for _, entry in ipairs(joinedPlayers) do lookup[entry.playerIndex] = true end
   end
-  if career_career and career_career.isActive and career_career.isActive() and extensions.isExtensionLoaded("careerSplitScreen") and careerSplitScreen.isActive() then
+  if isCareerModeActive() and extensions.isExtensionLoaded("careerSplitScreen") and careerSplitScreen.isActive() then
     lookup[0] = true
     lookup[1] = true
   end
@@ -275,7 +281,7 @@ local function getAssignedPlayers(devices, logEnabled, seatPlayers)
 
   -- re-seat all players in vehicles when requested
   local potentialSeatChanges = changed or multiseat -- skip re-seating players when there's no chance they'll end in a different car
-  if career_career and career_career.isActive and career_career.isActive() then
+  if isCareerModeActive() then
     seatPlayers = false
   end
   if potentialSeatChanges and seatPlayers then
@@ -727,7 +733,7 @@ local function getJoinedPlayers()
 end
 
 local function isPlayerActive(player)
-  if career_career and career_career.isActive and career_career.isActive() and extensions.isExtensionLoaded("careerSplitScreen") and careerSplitScreen.isActive() then
+  if isCareerModeActive() and extensions.isExtensionLoaded("careerSplitScreen") and careerSplitScreen.isActive() then
     if player == 0 or player == 1 then return true end
   end
   for _, activePlayer in ipairs(activePlayers) do

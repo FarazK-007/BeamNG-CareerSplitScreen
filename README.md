@@ -49,6 +49,11 @@ Enables native, local split-screen multiplayer inside **BeamNG.drive Career Mode
 - When Player 1 enters a timed Career mission, scenario, or delivery challenge, the mod automatically switches to a full-screen solo camera view to guarantee checkpoint and timer stability.
 - Once the mission concludes or is abandoned, split-screen is smoothly restored.
 
+### 🧩 Full Compatibility (Vanilla + RLS Career Overhaul)
+- **Vanilla Career Mode**: 100% native out-of-the-box support.
+- **RLS Career Overhaul**: Fully supported! Automatically recognizes RLS's custom game state (`overhaul`), the RLS garage inventory (`overhaul_career_garage_inventory`), RLS progression, and custom overhaul maps (West Coast, Utah, Italy, Hirochi Raceway, etc.).
+- **Zero File Conflicts**: Clean, non-destructive bridging that coordinates directly with RLS's internal multiseat hooks.
+
 ---
 
 ## 🚀 Installation
