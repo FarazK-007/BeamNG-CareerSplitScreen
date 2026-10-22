@@ -1,0 +1,22 @@
+# BeamNG Mod .gitignore
+
+# OS Generated Files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+*.swp
+*~
+
+# IDE & Editor Configs
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Temporary Test Files & Artifacts
+test_*.png
+*.tmp
+*.log
+scratch/

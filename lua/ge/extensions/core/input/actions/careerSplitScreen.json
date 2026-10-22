@@ -1,0 +1,18 @@
+{
+  "career_splitscreen_toggle": {
+    "cat": "gameplay",
+    "order": 100,
+    "ctx": "tlua",
+    "onDown": "if careerSplitScreen then careerSplitScreen.toggle() end",
+    "title": "Toggle Career Split-Screen",
+    "desc": "Toggles split-screen co-op mode in Career Mode"
+  },
+  "career_splitscreen_teleport_p2": {
+    "cat": "gameplay",
+    "order": 101,
+    "ctx": "tlua",
+    "onDown": "if careerSplitScreen then careerSplitScreen.teleportP2ToP1() end",
+    "title": "Teleport Player 2 to Player 1",
+    "desc": "Teleports Player 2 vehicle next to Player 1"
+  }
+}
