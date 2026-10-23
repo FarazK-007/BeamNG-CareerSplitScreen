@@ -1,4 +1,4 @@
-# BeamNG.drive Career Mode Split-Screen Co-op Mod 🚗💨
+# BeamNG.drive Career Mode Split-Screen Co-op Mod + RLS Career Overhaul support 🚗💨
 
 [![BeamNG Version](https://img.shields.io/badge/BeamNG.drive-v0.33%2B-orange.svg)](https://beamng.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
