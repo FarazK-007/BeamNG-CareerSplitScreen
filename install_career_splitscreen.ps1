@@ -56,25 +56,27 @@ if (Test-Path $userModsDir) {
     Write-Host "[!] Warning: Mods directory not found at $userModsDir" -ForegroundColor Yellow
 }
 
-# Direct override deployment to current\lua ensures BeamNG boots with mod overrides directly
-$currentDir = "C:\Users\gofar\AppData\Local\BeamNG\BeamNG.drive\current"
-if (Test-Path $currentDir) {
-    Write-Host "[+] Deploying direct override Lua files to current\lua..." -ForegroundColor Cyan
-    $luaSource = Join-Path $modSourceDir "lua"
-    Copy-Item -Path "$luaSource\*" -Destination (Join-Path $currentDir "lua") -Recurse -Force
-    Write-Host "[OK] Direct Lua files synchronized to $currentDir\lua" -ForegroundColor Green
+# Direct override deployment to current\lua only if -DevHotReload is explicitly specified
+if ($DevHotReload) {
+    $currentDir = "C:\Users\gofar\AppData\Local\BeamNG\BeamNG.drive\current"
+    if (Test-Path $currentDir) {
+        Write-Host "[+] Deploying direct override Lua files to current\lua (DevHotReload active)..." -ForegroundColor Cyan
+        $luaSource = Join-Path $modSourceDir "lua"
+        Copy-Item -Path "$luaSource\*" -Destination (Join-Path $currentDir "lua") -Recurse -Force
+        Write-Host "[OK] Direct Lua files synchronized to $currentDir\lua" -ForegroundColor Green
 
-    if (Test-Path (Join-Path $modSourceDir "art")) {
-        $artDest = Join-Path $currentDir "art"
-        if (-not (Test-Path $artDest)) { New-Item -ItemType Directory -Force -Path $artDest | Out-Null }
-        Copy-Item -Path (Join-Path $modSourceDir "art\*") -Destination $artDest -Recurse -Force
-        Write-Host "[OK] Direct art files synchronized to $artDest" -ForegroundColor Green
-    }
-    if (Test-Path (Join-Path $modSourceDir "ui")) {
-        $uiDest = Join-Path $currentDir "ui"
-        if (-not (Test-Path $uiDest)) { New-Item -ItemType Directory -Force -Path $uiDest | Out-Null }
-        Copy-Item -Path (Join-Path $modSourceDir "ui\*") -Destination $uiDest -Recurse -Force
-        Write-Host "[OK] Direct UI files synchronized to $uiDest" -ForegroundColor Green
+        if (Test-Path (Join-Path $modSourceDir "art")) {
+            $artDest = Join-Path $currentDir "art"
+            if (-not (Test-Path $artDest)) { New-Item -ItemType Directory -Force -Path $artDest | Out-Null }
+            Copy-Item -Path (Join-Path $modSourceDir "art\*") -Destination $artDest -Recurse -Force
+            Write-Host "[OK] Direct art files synchronized to $artDest" -ForegroundColor Green
+        }
+        if (Test-Path (Join-Path $modSourceDir "ui")) {
+            $uiDest = Join-Path $currentDir "ui"
+            if (-not (Test-Path $uiDest)) { New-Item -ItemType Directory -Force -Path $uiDest | Out-Null }
+            Copy-Item -Path (Join-Path $modSourceDir "ui\*") -Destination $uiDest -Recurse -Force
+            Write-Host "[OK] Direct UI files synchronized to $uiDest" -ForegroundColor Green
+        }
     }
 }
 

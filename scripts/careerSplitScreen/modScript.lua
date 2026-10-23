@@ -8,19 +8,16 @@ if settings and settings.getValue and settings.getValue("multiseat") then
   settings.setValue("multiseat", false)
 end
 
--- 2. Force-reload core_multiseat so that our mod override takes over immediately
-pcall(function() extensions.reload("core_multiseat") end)
-
--- 3. Load careerSplitScreen extension
+-- 2. Load careerSplitScreen extension
 extensions.load("careerSplitScreen")
 setExtensionUnloadMode("careerSplitScreen", "manual")
 
--- 4. Ensure all connected devices are bound to Player 0 immediately (fixes any "N/A" keybinds)
+-- 3. Ensure all connected devices are bound to Player 0 immediately
 if careerSplitScreen and careerSplitScreen.ensureSinglePlayerInputState then
   careerSplitScreen.ensureSinglePlayerInputState()
 end
 
--- 5. Fix multi-level reputation crash if reputation module is present
+-- 4. Fix multi-level reputation crash if reputation module is present
 if careerSplitScreen and careerSplitScreen.patchReputationModule then
   careerSplitScreen.patchReputationModule()
 end

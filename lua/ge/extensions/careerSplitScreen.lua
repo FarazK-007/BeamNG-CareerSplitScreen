@@ -747,16 +747,81 @@ local function findOrSpawnP2Vehicle(callback, preferredInvId)
   end
 end
 
+local customDeviceMap = {}
+
+local function hookCoreMultiseat()
+  if not core_multiseat or core_multiseat._careerSplitHooked then return end
+  core_multiseat._careerSplitHooked = true
+
+  core_multiseat.setDevicePlayer = function(devname, player)
+    customDeviceMap[devname] = player
+    if core_input_bindings and core_input_bindings.setPlayerToDevice then
+      core_input_bindings.setPlayerToDevice(devname, player)
+    end
+  end
+
+  if not core_multiseat.getDevicesByPlayer then
+    core_multiseat.getDevicesByPlayer = function()
+      local result = {}
+      local devs = (core_input_bindings and core_input_bindings.devices) or {}
+      for devname, info in pairs(devs) do
+        local p = customDeviceMap[devname] or (core_input_bindings and core_input_bindings.assignedPlayers and core_input_bindings.assignedPlayers[devname]) or 0
+        if not isSplitModeActive() then p = 0 end
+        result[p] = result[p] or {}
+        table.insert(result[p], {
+          id = devname,
+          productName = (Input and Input.getProductName and Input.getProductName(devname)) or devname,
+          controllerIndex = tonumber(string.match(devname, "(%d+)$")),
+          connected = true,
+        })
+      end
+      return result
+    end
+  end
+
+  local origGetAssignedPlayers = core_multiseat.getAssignedPlayers
+  core_multiseat.getAssignedPlayers = function(devices, logEnabled, seatPlayers)
+    if not isSplitModeActive() then
+      local result = {}
+      local devs = devices or (core_input_bindings and core_input_bindings.devices) or {}
+      for devname in pairs(devs) do
+        result[devname] = 0
+      end
+      return result
+    end
+
+    if isCareerModeActive() then seatPlayers = false end
+
+    local result = {}
+    local devs = devices or (core_input_bindings and core_input_bindings.devices) or {}
+    for devname in pairs(devs) do
+      local p = customDeviceMap[devname]
+      if p == nil then
+        if string.find(devname, "keyboard") or string.find(devname, "mouse") then
+          p = 0
+        else
+          p = -1
+        end
+      end
+      result[devname] = p
+    end
+    return result
+  end
+
+  local origIsPlayerActive = core_multiseat.isPlayerActive
+  core_multiseat.isPlayerActive = function(player)
+    if isSplitModeActive() and (player == 0 or player == 1) then
+      return true
+    end
+    if origIsPlayerActive then return origIsPlayerActive(player) end
+    return player == 0
+  end
+
+  log("I", "careerSplitScreen", "Successfully hooked core_multiseat without reloading.")
+end
+
 local function ensureModExtensionsLoaded()
-  if not core_multiseat or not core_multiseat._careerSplitScreenMod then
-    pcall(function() extensions.reload("core_multiseat") end)
-  end
-  if not gameplay_markerInteraction or not gameplay_markerInteraction._careerSplitScreenMod then
-    pcall(function() extensions.reload("gameplay_markerInteraction") end)
-  end
-  if not gameplay_rawPois or not gameplay_rawPois._careerSplitScreenMod then
-    pcall(function() extensions.reload("gameplay_rawPois") end)
-  end
+  hookCoreMultiseat()
 end
 
 local function getConnectedDevicesSummary()
@@ -822,6 +887,7 @@ end
 
 local function ensureSinglePlayerInputState()
   if isSplitActive then return end
+  table.clear(customDeviceMap)
   if settings and settings.getValue and settings.getValue('multiseat') then
     settings.setValue('multiseat', false)
   end
@@ -958,8 +1024,8 @@ local function startSplitScreen()
   -- 1. CRITICAL: Mark split active FIRST so isSplitModeActive() returns true immediately
   isSplitActive = true
 
-  -- 2. Ensure mod overrides are active without needing Ctrl + L
-  ensureModExtensionsLoaded()
+  -- 2. Hook core multiseat without reloading
+  hookCoreMultiseat()
 
   local p1VehId = p1Veh:getId()
   local p1IsWalking = (gameplay_walk and gameplay_walk.isWalking and gameplay_walk.isWalking(0))
