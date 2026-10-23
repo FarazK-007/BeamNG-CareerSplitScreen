@@ -171,8 +171,6 @@ end
 local function isSplitModeActive()
   return isSplitActive
     or (render_splitScreen and render_splitScreen.isEnabled and render_splitScreen.isEnabled())
-    or (core_multiseat and core_multiseat.isMultiseatActive and core_multiseat.isMultiseatActive())
-    or (getPlayerVehicle(1) ~= nil and getPlayerVehicle(1) ~= getPlayerVehicle(0))
 end
 
 local function isActive()
@@ -2467,6 +2465,12 @@ local function drawCurrencyIconVector(drawList, im, minPos, size, col)
   drawList:AddRectFilled(im.ImVec2(x + 14 * sx, y + 12.5 * sy), im.ImVec2(x + 16.5 * sx, y + 19 * sy), col)
 end
 
+local function drawExitIconVector(drawList, im, cx, cy, radius, col)
+  local r = radius or 4.5
+  drawList:AddLine(im.ImVec2(cx - r, cy - r), im.ImVec2(cx + r, cy + r), col, 2.0)
+  drawList:AddLine(im.ImVec2(cx - r, cy + r), im.ImVec2(cx + r, cy - r), col, 2.0)
+end
+
 local function drawRefreshIconVector(drawList, im, cx, cy, radius, col)
   local pi = math.pi
   drawList:PathClear()
@@ -2504,13 +2508,14 @@ local cachedBankSize = nil
 local cachedMoneyW = 0
 
 local function drawTopLeftMoneyAndRefresh()
+  -- Strictly show ONLY when split-screen is actively running; hide when not started, during loading, menus, or single-player
+  if not isSplitActive then return end
+  if not isCareerModeActive() then return end
+
   local im = ui_imgui
   if not im then return end
   if editor and editor.active then return end
   if freeroam_bigMapMode and freeroam_bigMapMode.bigMapActive() then return end
-
-  -- Only show on split-screen; hide in single player
-  if not isSplitModeActive() then return end
 
   local cur = extensions.ui_router and extensions.ui_router.getCurrent()
   local rName = cur and (cur.resolved and cur.resolved.name or cur.request and cur.request.name or cur.name)
@@ -2696,47 +2701,30 @@ local function drawTopLeftMoneyAndRefresh()
       curX = curX + 8
     end
 
-    -- 5. Square Refresh UI button with refresh icon
+    -- 5. Square Hard Exit Split-Screen button
     local btnY = (boxH - btnSize) * 0.5
     im.SetCursorPos(im.ImVec2(curX, btnY))
 
     im.PushStyleVar2(im.StyleVar_FramePadding, im.ImVec2(0, 0))
     im.PushStyleVar1(im.StyleVar_FrameRounding, 4)
-    im.PushStyleColor1(im.Col_Button, im.GetColorU322(im.ImVec4(0.18, 0.22, 0.28, 0.85)))
-    im.PushStyleColor1(im.Col_ButtonHovered, im.GetColorU322(im.ImVec4(0.28, 0.36, 0.50, 1.0)))
-    im.PushStyleColor1(im.Col_ButtonActive, im.GetColorU322(im.ImVec4(0.12, 0.16, 0.22, 1.0)))
+    im.PushStyleColor1(im.Col_Button, im.GetColorU322(im.ImVec4(0.32, 0.12, 0.14, 0.85)))
+    im.PushStyleColor1(im.Col_ButtonHovered, im.GetColorU322(im.ImVec4(0.85, 0.22, 0.22, 1.0)))
+    im.PushStyleColor1(im.Col_ButtonActive, im.GetColorU322(im.ImVec4(0.55, 0.10, 0.10, 1.0)))
 
-    local btnClicked = im.Button("###btn_refresh_ui", im.ImVec2(btnSize, btnSize))
+    local btnClicked = im.Button("###btn_hard_exit_splitscreen", im.ImVec2(btnSize, btnSize))
     local btnHovered = im.IsItemHovered()
     if btnHovered then
-      im.SetTooltip("Refresh split-screen minimaps and UI")
+      im.SetTooltip("Exit Split-Screen (Return to Single-Player)")
     end
 
-    local rIconSize = 16
-    local rOffset = (btnSize - rIconSize) * 0.5
-    local rMin = im.ImVec2(winPos.x + curX + rOffset, winPos.y + btnY + rOffset)
-    local rMax = im.ImVec2(rMin.x + rIconSize, rMin.y + rIconSize)
-    local iconCol = btnHovered and im.GetColorU322(im.ImVec4(1.0, 1.0, 1.0, 1.0)) or im.GetColorU322(im.ImVec4(0.88, 0.90, 0.94, 0.92))
-
-    local drawnRefresh = false
-    if refreshTex and refreshTex.tex and refreshTex.tex.getID then
-      local ok, texId = pcall(function() return refreshTex.tex:getID() end)
-      if ok and texId then
-        local okDraw = pcall(function()
-          im.ImDrawList_AddImage(drawList, texId, rMin, rMax, im.ImVec2(0, 0), im.ImVec2(1, 1), iconCol)
-        end)
-        drawnRefresh = okDraw
-      end
-    end
-    if not drawnRefresh then
-      drawRefreshIconVector(drawList, im, winPos.x + curX + btnSize * 0.5, winPos.y + btnY + btnSize * 0.5, 6.0, iconCol)
-    end
+    local iconCol = btnHovered and im.GetColorU322(im.ImVec4(1.0, 1.0, 1.0, 1.0)) or im.GetColorU322(im.ImVec4(0.92, 0.90, 0.94, 0.92))
+    drawExitIconVector(drawList, im, winPos.x + curX + btnSize * 0.5, winPos.y + btnY + btnSize * 0.5, 4.5, iconCol)
 
     im.PopStyleColor(3)
     im.PopStyleVar(2)
 
     if btnClicked then
-      refreshAllUI()
+      stopSplitScreen()
     end
   end
   im.End()
@@ -2752,9 +2740,11 @@ local function onPreRender(dt)
   if not okPrompt then
     log("E", "careerSplitScreen", "Error in drawPlayerInteractPrompts: " .. tostring(errPrompt))
   end
-  local ok, err = pcall(drawTopLeftMoneyAndRefresh)
-  if not ok then
-    log("E", "careerSplitScreen", "Error in drawTopLeftMoneyAndRefresh: " .. tostring(err))
+  if isSplitActive then
+    local ok, err = pcall(drawTopLeftMoneyAndRefresh)
+    if not ok then
+      log("E", "careerSplitScreen", "Error in drawTopLeftMoneyAndRefresh: " .. tostring(err))
+    end
   end
 
   if freeroam_bigMapMode and not freeroam_bigMapMode._careerSplitHooked then

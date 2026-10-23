@@ -24,9 +24,10 @@ Enables native, local split-screen multiplayer inside **BeamNG.drive Career Mode
 - **Always Visible Route Decals**: Extended fade distance ensures Player 2's route decals never disappear or hide when Player 1 drives far away.
 - **Gated to Split-Screen**: In single-player mode, native default route colors remain completely unchanged.
 
-### 💰 On-Screen Career Balance & UI Refresh HUD
-- **Live Cash Balance**: Sleek, modern top-left HUD pill in split-screen showing current Career money alongside the official BeamNG currency icon.
-- **Instant Refresh Button**: Compact square button with vector refresh icon to reload split-screen minimaps, UI overlays, and vehicle blips with a single click.
+### 💰 On-Screen Career Balance & Hard Exit HUD
+- **Live Cash Balance**: Sleek, modern top-left HUD pill displayed strictly when split-screen is active, showing current Career money alongside the official BeamNG currency icon.
+- **Instant Hard Exit Button**: Compact square red-accented button (`[X]`) next to the money pill to immediately terminate split-screen and cleanly return to single-player with a single click.
+- **100% Gated to Split-Screen**: The top-left HUD remains completely hidden when the game starts, during loading screens, in menus, and during normal single-player gameplay.
 
 ### 🚗 Career Fleet Co-op & Persistence
 - **Drive Owned Fleet Vehicles**: Player 2 can drive any secondary vehicle owned in your Career garage.
