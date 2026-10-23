@@ -740,6 +740,7 @@ local function updateBigMapVehicles()
 end
 
 local function drawBigMapPlayerSelector()
+  if extensions.isExtensionLoaded("careerSplitScreen") then return end
   if not freeroam_bigMapMode or not freeroam_bigMapMode.bigMapActive() then return end
   if not render_splitScreen then return end
   local players = render_splitScreen.getPlayers and render_splitScreen.getPlayers() or {}

@@ -469,9 +469,260 @@ local function bindBigMapSelectKeys()
   end
 end
 
+local function toggleRouteTarget()
+  if not core_groundMarkers or not core_groundMarkers.getTargetPlayer or not core_groundMarkers.setTargetPlayer then return end
+  local cur = core_groundMarkers.getTargetPlayer()
+  local nxt = (cur == 0) and 1 or 0
+  core_groundMarkers.setTargetPlayer(nxt)
+  Engine.Audio.playOnce('AudioGui', 'event:>UI>Main>select')
+  if guihooks and guihooks.trigger then
+    guihooks.trigger('toastrMsg', {
+      type = 'info',
+      title = 'Map Route Target',
+      msg = (nxt == 0 and 'Routing for Player 1 (Orange)' or 'Routing for Player 2 (Blue)'),
+      config = {timeOut = 1500}
+    })
+  end
+end
+
+local function updateBigMapVehicles()
+  if not freeroam_bigMapMode or not freeroam_bigMapMode.bigMapActive or not freeroam_bigMapMode.bigMapActive() then return end
+  local iconRenderer = gameplay_playmodeMarkers and gameplay_playmodeMarkers.getBigmapRendererObj and gameplay_playmodeMarkers.getBigmapRendererObj()
+  if not iconRenderer then return end
+
+  local pVeh = getP2Vehicle()
+  if pVeh then
+    local iconName = "playerVehicle_1"
+    local icon = iconRenderer:getIconByName(iconName)
+    if not icon then
+      iconRenderer:addIcon(iconName, "player_marker", pVeh:getPosition())
+      icon = iconRenderer:getIconByName(iconName)
+      if icon then
+        icon.color = ColorI(0, 140, 255, 255)
+        icon.customSizeFactor = 0.75
+      end
+    else
+      icon.pos = pVeh:getPosition()
+      icon.color = ColorI(0, 140, 255, 255)
+    end
+  end
+end
+
+local function drawBigMapPlayerSelector()
+  if not freeroam_bigMapMode or not freeroam_bigMapMode.bigMapActive or not freeroam_bigMapMode.bigMapActive() then return end
+  if not isSplitModeActive() then return end
+
+  local im = ui_imgui
+  if not im then return end
+
+  local canvas = scenetree.findObject("Canvas")
+  local winW, winH = 1920, 1080
+  if canvas and canvas.getWindowClientSizeXY then
+    winW, winH = canvas:getWindowClientSizeXY()
+  end
+
+  local btnW = 125
+  local btnH = 34
+  local currentNavTarget = (core_groundMarkers and core_groundMarkers.getTargetPlayer and core_groundMarkers.getTargetPlayer()) or 0
+
+  local hasTargetRoute = core_groundMarkers and core_groundMarkers.currentlyHasTarget and core_groundMarkers.currentlyHasTarget(currentNavTarget)
+  if not hasTargetRoute and core_groundMarkers and core_groundMarkers.getPathForPlayer then
+    hasTargetRoute = (core_groundMarkers.getPathForPlayer(currentNavTarget) ~= nil)
+  end
+
+  local barW = hasTargetRoute and 540 or 460
+  local barH = 50
+  local posX = (winW - barW) * 0.5
+  local posY = 14
+
+  im.SetNextWindowPos(im.ImVec2(posX, posY), im.Cond_Always)
+  im.SetNextWindowSize(im.ImVec2(barW, barH), im.Cond_Always)
+
+  if im.GetMainViewport and im.SetNextWindowViewport then
+    local mainVp = im.GetMainViewport()
+    if mainVp and mainVp.ID then
+      im.SetNextWindowViewport(mainVp.ID)
+    end
+  end
+
+  local flags = bit.bor(
+    im.WindowFlags_NoTitleBar,
+    im.WindowFlags_NoResize,
+    im.WindowFlags_NoMove,
+    im.WindowFlags_NoScrollbar,
+    im.WindowFlags_NoCollapse,
+    im.WindowFlags_NoNavFocus,
+    im.WindowFlags_NoFocusOnAppearing
+  )
+  if im.WindowFlags_NoDocking then
+    flags = bit.bor(flags, im.WindowFlags_NoDocking)
+  end
+
+  im.PushStyleVar2(im.StyleVar_WindowPadding, im.ImVec2(12, 8))
+  im.PushStyleVar1(im.StyleVar_WindowRounding, 8)
+  im.PushStyleVar1(im.StyleVar_WindowBorderSize, 2)
+  im.PushStyleColor1(im.Col_WindowBg, im.GetColorU322(im.ImVec4(0.05, 0.07, 0.11, 0.94)))
+  im.PushStyleColor1(im.Col_Border, im.GetColorU322(im.ImVec4(0.25, 0.38, 0.55, 0.85)))
+
+  if im.Begin("###CareerBigMapPlayerSelector", nil, flags) then
+    im.AlignTextToFramePadding()
+    im.TextColored(im.ImVec4(0.85, 0.92, 1.0, 1.0), "Route For:")
+    im.SameLine()
+
+    -- P1 Button (Orange)
+    local isP1Selected = (currentNavTarget == 0)
+    if isP1Selected then
+      im.PushStyleColor1(im.Col_Button, im.GetColorU322(im.ImVec4(0.95, 0.45, 0.05, 0.95)))
+      im.PushStyleColor1(im.Col_ButtonHovered, im.GetColorU322(im.ImVec4(1.0, 0.55, 0.15, 1.0)))
+      im.PushStyleColor1(im.Col_Text, im.GetColorU322(im.ImVec4(1, 1, 1, 1)))
+    else
+      im.PushStyleColor1(im.Col_Button, im.GetColorU322(im.ImVec4(0.18, 0.20, 0.26, 0.8)))
+      im.PushStyleColor1(im.Col_ButtonHovered, im.GetColorU322(im.ImVec4(0.28, 0.32, 0.40, 0.9)))
+      im.PushStyleColor1(im.Col_Text, im.GetColorU322(im.ImVec4(0.7, 0.75, 0.8, 0.85)))
+    end
+
+    if im.Button("P1 (Orange)###btn_nav_p1", im.ImVec2(btnW, btnH)) then
+      if core_groundMarkers and core_groundMarkers.setTargetPlayer then
+        core_groundMarkers.setTargetPlayer(0)
+        Engine.Audio.playOnce('AudioGui', 'event:>UI>Main>select')
+      end
+    end
+    im.PopStyleColor(3)
+
+    im.SameLine()
+
+    -- P2 Button (Blue)
+    local isP2Selected = (currentNavTarget == 1)
+    if isP2Selected then
+      im.PushStyleColor1(im.Col_Button, im.GetColorU322(im.ImVec4(0.10, 0.50, 0.95, 0.95)))
+      im.PushStyleColor1(im.Col_ButtonHovered, im.GetColorU322(im.ImVec4(0.20, 0.60, 1.0, 1.0)))
+      im.PushStyleColor1(im.Col_Text, im.GetColorU322(im.ImVec4(1, 1, 1, 1)))
+    else
+      im.PushStyleColor1(im.Col_Button, im.GetColorU322(im.ImVec4(0.18, 0.20, 0.26, 0.8)))
+      im.PushStyleColor1(im.Col_ButtonHovered, im.GetColorU322(im.ImVec4(0.28, 0.32, 0.40, 0.9)))
+      im.PushStyleColor1(im.Col_Text, im.GetColorU322(im.ImVec4(0.7, 0.75, 0.8, 0.85)))
+    end
+
+    if im.Button("P2 (Blue)###btn_nav_p2", im.ImVec2(btnW, btnH)) then
+      if core_groundMarkers and core_groundMarkers.setTargetPlayer then
+        core_groundMarkers.setTargetPlayer(1)
+        Engine.Audio.playOnce('AudioGui', 'event:>UI>Main>select')
+      end
+    end
+    im.PopStyleColor(3)
+
+    -- Clear Button (if current target has an active route)
+    if hasTargetRoute then
+      im.SameLine()
+      im.PushStyleColor1(im.Col_Button, im.GetColorU322(im.ImVec4(0.55, 0.15, 0.15, 0.85)))
+      im.PushStyleColor1(im.Col_ButtonHovered, im.GetColorU322(im.ImVec4(0.75, 0.2, 0.2, 1.0)))
+      im.PushStyleColor1(im.Col_Text, im.GetColorU322(im.ImVec4(1, 1, 1, 1)))
+      if im.Button("Clear###btn_nav_clear", im.ImVec2(65, btnH)) then
+        if core_groundMarkers.clearPathForPlayer then
+          core_groundMarkers.clearPathForPlayer(currentNavTarget)
+        end
+        if freeroam_bigMapMode and freeroam_bigMapMode.resetRoute then
+          freeroam_bigMapMode.resetRoute()
+        end
+        Engine.Audio.playOnce('AudioGui', 'event:>UI>Main>select')
+      end
+      im.PopStyleColor(3)
+    end
+
+    im.SameLine()
+    im.TextColored(im.ImVec4(0.55, 0.65, 0.75, 0.85), "[Tab] Switch")
+  end
+  im.End()
+
+  im.PopStyleColor(2)
+  im.PopStyleVar(3)
+end
+
+local origToggleBigMap = nil
+local origEnterBigMap = nil
+local origExitBigMap = nil
+
+local function careerToggleBigMap(...)
+  if isSplitModeActive() or isCareerModeActive() then
+    if freeroam_bigMapMode and freeroam_bigMapMode.bigMapActive and freeroam_bigMapMode.bigMapActive() then
+      freeroam_bigMapMode.exitBigMap(true, true)
+      return
+    else
+      local rName = extensions.ui_router and extensions.ui_router.getCurrent and extensions.ui_router.getCurrent()
+      rName = rName and rName.resolved and rName.resolved.name
+      if rName == "multiseat" or rName == "play" or rName == "pause" or string.find(rName or "", "pause") or not rName then
+        if overhaul_phone_phone and overhaul_phone_phone.isPhoneOpen and overhaul_phone_phone.isPhoneOpen() then
+          overhaul_phone_phone.closePhone()
+        end
+        if freeroam_bigMapMode and freeroam_bigMapMode.enterBigMap then
+          freeroam_bigMapMode.enterBigMap({instant = true, forceOpen = true})
+        end
+        return
+      end
+    end
+  end
+  if origToggleBigMap and origToggleBigMap ~= careerToggleBigMap then
+    return origToggleBigMap(...)
+  end
+  if freeroam_bigMapMode and freeroam_bigMapMode.enterBigMap then
+    freeroam_bigMapMode.enterBigMap({instant = true, forceOpen = true})
+  end
+end
+
+local function careerEnterBigMap(options, ...)
+  options = options or {}
+  if isSplitModeActive() then
+    options.instant = true
+    options.forceOpen = true
+  end
+  if origEnterBigMap and origEnterBigMap ~= careerEnterBigMap then
+    local res = origEnterBigMap(options, ...)
+    if isSplitModeActive() then
+      bindBigMapSelectKeys()
+    end
+    return res
+  end
+end
+
+local function careerExitBigMap(instant, closeEscMenu, forceGameCam, ...)
+  if isSplitModeActive() then
+    instant = true
+  end
+  local res
+  if origExitBigMap and origExitBigMap ~= careerExitBigMap then
+    res = origExitBigMap(instant, closeEscMenu, forceGameCam, ...)
+  end
+  if isSplitModeActive() then
+    if extensions.ui_menuManager and extensions.ui_menuManager.setGameplayRoute then
+      extensions.ui_menuManager.setGameplayRoute("multiseat")
+    end
+    if extensions.ui_router and extensions.ui_router.reload then
+      extensions.ui_router.reload("multiseat", nil, {force = true})
+    end
+  end
+  return res
+end
+
 local function hookBigMapMode()
-  if freeroam_bigMapMode and not freeroam_bigMapMode._careerSplitHooked then
-    freeroam_bigMapMode._careerSplitHooked = true
+  if not freeroam_bigMapMode then return end
+
+  if freeroam_bigMapMode.toggleBigMap ~= careerToggleBigMap then
+    origToggleBigMap = freeroam_bigMapMode.toggleBigMap
+    freeroam_bigMapMode.toggleBigMap = careerToggleBigMap
+  end
+
+  if freeroam_bigMapMode.enterBigMap ~= careerEnterBigMap then
+    origEnterBigMap = freeroam_bigMapMode.enterBigMap
+    freeroam_bigMapMode.enterBigMap = careerEnterBigMap
+  end
+
+  if freeroam_bigMapMode.exitBigMap ~= careerExitBigMap then
+    origExitBigMap = freeroam_bigMapMode.exitBigMap
+    freeroam_bigMapMode.exitBigMap = careerExitBigMap
+  end
+
+  if not freeroam_bigMapMode._careerSplitCamHooked then
+    freeroam_bigMapMode._careerSplitCamHooked = true
 
     -- Hook camMode.onMouseButton: in split-screen mode, left click should not drag or pan the map
     local camMode = core_camera and core_camera.getGlobalCameras and core_camera.getGlobalCameras()["bigMap"]
@@ -487,61 +738,6 @@ local function hookBigMapMode()
           return origCamOnMouseButton(self, buttonDown, mouseDragging, ...)
         end
       end
-    end
-
-    local origToggleBigMap = freeroam_bigMapMode.toggleBigMap
-    freeroam_bigMapMode.toggleBigMap = function(...)
-      if isSplitModeActive() or isCareerModeActive() then
-        if freeroam_bigMapMode.bigMapActive() then
-          freeroam_bigMapMode.exitBigMap(true, true)
-          return
-        else
-          if overhaul_phone_phone and overhaul_phone_phone.isPhoneOpen and overhaul_phone_phone.isPhoneOpen() then
-            overhaul_phone_phone.closePhone()
-          end
-          freeroam_bigMapMode.enterBigMap({instant = true, forceOpen = true})
-          return
-        end
-      end
-      if origToggleBigMap then
-        return origToggleBigMap(...)
-      end
-    end
-
-    local origEnterBigMap = freeroam_bigMapMode.enterBigMap
-    freeroam_bigMapMode.enterBigMap = function(options, ...)
-      options = options or {}
-      if isSplitModeActive() then
-        options.instant = true
-        options.forceOpen = true
-      end
-      if origEnterBigMap then
-        local res = origEnterBigMap(options, ...)
-        if isSplitModeActive() then
-          bindBigMapSelectKeys()
-        end
-        return res
-      end
-    end
-
-    local origExitBigMap = freeroam_bigMapMode.exitBigMap
-    freeroam_bigMapMode.exitBigMap = function(instant, closeEscMenu, forceGameCam, ...)
-      if isSplitModeActive() then
-        instant = true
-      end
-      local res
-      if origExitBigMap then
-        res = origExitBigMap(instant, closeEscMenu, forceGameCam, ...)
-      end
-      if isSplitModeActive() then
-        if extensions.ui_menuManager and extensions.ui_menuManager.setGameplayRoute then
-          extensions.ui_menuManager.setGameplayRoute("multiseat")
-        end
-        if extensions.ui_router and extensions.ui_router.reload then
-          extensions.ui_router.reload("multiseat", nil, {force = true})
-        end
-      end
-      return res
     end
 
     -- Hook onCameraPreRender: crosshair is always visible ONLY in split-screen mode
@@ -574,10 +770,11 @@ local function hookBigMapMode()
           if canvas and canvas.getWindowClientSizeXY then
             winW = canvas:getWindowClientSizeXY()
           end
-          local barW = 540
-          local minX = (winW - barW) * 0.5
-          local maxX = (winW + barW) * 0.5
-          if mPos and mPos.x >= minX and mPos.x <= maxX and mPos.y >= 0 and mPos.y <= 75 then
+          local barW = 560
+          local minX = (winW - barW) * 0.5 - 20
+          local maxX = (winW + barW) * 0.5 + 20
+          if (mPos and mPos.x >= minX and mPos.x <= maxX and mPos.y >= 0 and mPos.y <= 85)
+            or (im.GetIO and im.GetIO().WantCaptureMouse) then
             -- Click is inside the Top Bar; let ImGui handle it exclusively
             return
           end
@@ -808,6 +1005,20 @@ local function hookCoreMultiseat()
     return result
   end
 
+  local origGetPlayers = core_multiseat.getPlayers
+  core_multiseat.getPlayers = function(result)
+    result = result or {}
+    table.clear(result)
+    if isSplitModeActive() then
+      result[1] = 0
+      result[2] = 1
+      return result
+    end
+    if origGetPlayers then return origGetPlayers(result) end
+    result[1] = 0
+    return result
+  end
+
   local origIsPlayerActive = core_multiseat.isPlayerActive
   core_multiseat.isPlayerActive = function(player)
     if isSplitModeActive() and (player == 0 or player == 1) then
@@ -815,6 +1026,45 @@ local function hookCoreMultiseat()
     end
     if origIsPlayerActive then return origIsPlayerActive(player) end
     return player == 0
+  end
+
+  local origGetParticipants = core_multiseat.getParticipants
+  core_multiseat.getParticipants = function(players)
+    local list = origGetParticipants and origGetParticipants(players) or {}
+    if isSplitModeActive() then
+      for _, p in ipairs(list) do
+        if p.assignment then
+          p.assignment.connected = true
+          if not p.assignment.connectedDeviceLabel or p.assignment.connectedDeviceLabel == "" then
+            p.assignment.connectedDeviceLabel = (p.assignment.playerIndex == 0 and "Keyboard & Mouse" or "Controller")
+            p.assignment.deviceLabel = p.assignment.connectedDeviceLabel
+          end
+          if not p.assignment.connectedInputIcon then
+            p.assignment.connectedInputIcon = (p.assignment.playerIndex == 0 and "keyboard" or "gamepad")
+            p.inputIcon = p.assignment.connectedInputIcon
+          end
+        end
+      end
+    end
+    return list
+  end
+
+  local origIsMultiseatActive = core_multiseat.isMultiseatActive
+  core_multiseat.isMultiseatActive = function()
+    if isSplitModeActive() or isCareerModeActive() then
+      return false
+    end
+    if origIsMultiseatActive then return origIsMultiseatActive() end
+    return false
+  end
+
+  local origSetMultiseatActive = core_multiseat.setMultiseatActive
+  core_multiseat.setMultiseatActive = function(active)
+    if isSplitModeActive() or isCareerModeActive() then
+      if origSetMultiseatActive then origSetMultiseatActive(false) end
+      return
+    end
+    if origSetMultiseatActive then origSetMultiseatActive(active) end
   end
 
   log("I", "careerSplitScreen", "Successfully hooked core_multiseat without reloading.")
@@ -969,6 +1219,36 @@ local function autoAssignDevices()
     end
   end
 
+  if core_multiseat and core_multiseat.applyConfiguration then
+    local commitConfig = {
+      participants = {
+        { playerIndex = 0, personaNumber = 1 },
+        { playerIndex = 1, personaNumber = 2 },
+      },
+      manualAssignments = devMap,
+      multiseatActive = false,
+    }
+    pcall(function()
+      local ok, reason = core_multiseat.applyConfiguration(commitConfig)
+      if core_multiseat.finalizeConfiguration then
+        core_multiseat.finalizeConfiguration()
+      end
+      if core_multiseat.setMultiseatActive then
+        core_multiseat.setMultiseatActive(false)
+      end
+      log("I", "careerSplitScreen", "Applied multiseat configuration directly: " .. tostring(ok) .. " " .. tostring(reason))
+    end)
+  end
+  guihooks.trigger("MultiseatConfigurationChanged")
+  guihooks.trigger("LocalParticipantsChanged")
+
+  if gameplay_rawPois and gameplay_rawPois.clear then
+    gameplay_rawPois.clear()
+  end
+  if gameplay_playmodeMarkers and gameplay_playmodeMarkers.clear then
+    gameplay_playmodeMarkers.clear()
+  end
+
   log("I", "careerSplitScreen", "Auto-assigned devices: " .. dumps(devMap):gsub("\n", ""):gsub("  ", " "))
 end
 
@@ -1076,7 +1356,7 @@ local function startSplitScreen()
   -- 4. Enable multiseat settings & extensions
   settings.setValue('multiseat', true)
   if core_multiseat then
-    core_multiseat.setMultiseatActive(true)
+    core_multiseat.setMultiseatActive(false)
     if core_multiseat.joinPlayer then
       core_multiseat.joinPlayer(0)
       core_multiseat.joinPlayer(1)
@@ -1132,6 +1412,12 @@ local function startSplitScreen()
   hookBigMapMode()
   hookCareerJobsAndLogistics()
 
+  if gameplay_rawPois and gameplay_rawPois.clear then
+    gameplay_rawPois.clear()
+  end
+  if gameplay_playmodeMarkers and gameplay_playmodeMarkers.clear then
+    gameplay_playmodeMarkers.clear()
+  end
   if overhaul_integration_services_markerInteraction and overhaul_integration_services_markerInteraction.setForceReevaluateOpenPrompt then
     overhaul_integration_services_markerInteraction.setForceReevaluateOpenPrompt()
   end
@@ -2821,8 +3107,14 @@ local function onPreRender(dt)
     end
   end
 
-  if freeroam_bigMapMode and not freeroam_bigMapMode._careerSplitHooked then
-    hookBigMapMode()
+  hookBigMapMode()
+  if core_multiseat and (isSplitModeActive() or isCareerModeActive()) then
+    if core_multiseat.isMultiseatActive() then
+      hookCoreMultiseat()
+      if core_multiseat.setMultiseatActive then
+        core_multiseat.setMultiseatActive(false)
+      end
+    end
   end
   if (overhaul_vehicles_playerVehicles and not overhaul_vehicles_playerVehicles._careerSplitHooked) or (career_modules_delivery_general and not career_modules_delivery_general._careerSplitContainersHooked) then
     hookCareerJobsAndLogistics()
@@ -2830,6 +3122,24 @@ local function onPreRender(dt)
 
   if freeroam_bigMapMode and freeroam_bigMapMode.bigMapActive() then
     if isSplitModeActive() then
+      local okVeh, errVeh = pcall(updateBigMapVehicles)
+      if not okVeh then
+        log("E", "careerSplitScreen", "Error in updateBigMapVehicles: " .. tostring(errVeh))
+      end
+
+      local okSelector, errSelector = pcall(drawBigMapPlayerSelector)
+      if not okSelector then
+        log("E", "careerSplitScreen", "Error in drawBigMapPlayerSelector: " .. tostring(errSelector))
+      end
+
+      -- Check keyboard Tab to cycle player route target
+      local im = ui_imgui
+      if im and im.IsKeyPressed and im.GetKeyIndex and im.Key_Tab then
+        if im.IsKeyPressed(im.GetKeyIndex(im.Key_Tab)) then
+          toggleRouteTarget()
+        end
+      end
+
       -- Guarantee the crosshair icon stays white and visible in split screen
       local iconRenderer = gameplay_playmodeMarkers and gameplay_playmodeMarkers.getBigmapRendererObj and gameplay_playmodeMarkers.getBigmapRendererObj()
       if iconRenderer then
@@ -2863,6 +3173,8 @@ local function onExtensionLoaded(extName)
   log("I", "careerSplitScreen", "Career Split-Screen extension initialized.")
 end
 
+M.toggleRouteTarget = toggleRouteTarget
+M.drawBigMapPlayerSelector = drawBigMapPlayerSelector
 M.ensureSinglePlayerInputState = ensureSinglePlayerInputState
 M.hasMultipleDevicesConnected = hasMultipleDevicesConnected
 M.getConnectedDevicesSummary = getConnectedDevicesSummary

@@ -374,6 +374,11 @@ end
 local function getPlayers(result)
   result = result or {}
   table.clear(result)
+  if isSplitModeActive() then
+    result[1] = 0
+    result[2] = 1
+    return result
+  end
   for index, player in ipairs(activePlayers) do
     result[index] = player
   end

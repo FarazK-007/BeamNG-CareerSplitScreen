@@ -98,6 +98,10 @@ local function getPlayers(result)
   elseif core_multiseat then
     core_multiseat.getPlayers(result)
   end
+  if #result <= 1 and extensions.isExtensionLoaded("careerSplitScreen") and (careerSplitScreen.isSplitModeActive and careerSplitScreen.isSplitModeActive() or careerSplitScreen.isActive and careerSplitScreen.isActive()) then
+    result[1] = 0
+    result[2] = 1
+  end
   while #result > maxViews do table.remove(result) end
   if #result == 0 then result[1] = 0 end
   return result
@@ -297,18 +301,27 @@ local function reconfigure(dt)
     resetExposure()
     local playerInfos = {}
     for _, participant in ipairs(getParticipants(players)) do
+      local isConn = participant.assignment.connected ~= false
+      if not isConn and extensions.isExtensionLoaded("careerSplitScreen") then
+        local pIdx = participant.assignment.playerIndex
+        if pIdx == 0 or pIdx == 1 then
+          isConn = true
+        end
+      end
       playerInfos[#playerInfos + 1] = {
         id = participant.id,
         player = participant.assignment.playerIndex,
         label = participant.persona.displayName,
         icon = participant.persona.icon,
         color = participant.persona.colorHex,
-        device = participant.assignment.connected and participant.assignment.connectedDeviceLabel
-          or participant.assignment.deviceLabel,
-        deviceIcon = participant.assignment.connected and participant.assignment.connectedInputIcon
-          or participant.inputIcon,
+        device = (isConn and participant.assignment.connectedDeviceLabel)
+          or participant.assignment.deviceLabel
+          or (participant.assignment.playerIndex == 0 and "Keyboard & Mouse" or "Controller"),
+        deviceIcon = (isConn and participant.assignment.connectedInputIcon)
+          or participant.inputIcon
+          or (participant.assignment.playerIndex == 0 and "keyboard" or "gamepad"),
         deviceIds = participant.assignment.deviceIds,
-        connected = participant.assignment.connected ~= false,
+        connected = isConn,
       }
     end
     uiState = {count = #players, layout = normalizedRects(rects, w, h), players = playerInfos, mode = shared and "shared" or "split"}
