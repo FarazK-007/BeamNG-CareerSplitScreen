@@ -41,6 +41,12 @@ routePlannersByPlayer[0] = M.routePlanner
 M.targetPlayerIndex = 0
 local lastGenerationPosByPlayer = {}
 
+local function isSplitModeActive()
+  return (careerSplitScreen and careerSplitScreen.isSplitModeActive and careerSplitScreen.isSplitModeActive())
+    or (careerSplitScreen and careerSplitScreen.isActive and careerSplitScreen.isActive())
+    or (render_splitScreen and render_splitScreen.isEnabled and render_splitScreen.isEnabled())
+end
+
 local function getRoutePlanner(playerIndex)
   playerIndex = playerIndex or 0
   if not routePlannersByPlayer[playerIndex] then
@@ -58,6 +64,13 @@ local function getTargetVeh(playerIndex)
       local p2 = careerSplitScreen.getP2Vehicle()
       if p2 then return p2 end
     end
+    if careerSplitScreen and careerSplitScreen.getP2VehicleId and be then
+      local id = careerSplitScreen.getP2VehicleId()
+      if id then
+        local veh = be:getObjectByID(id)
+        if veh then return veh end
+      end
+    end
     return getPlayerVehicle(1)
   else
     return getPlayerVehicle(playerIndex)
@@ -67,15 +80,29 @@ end
 local function setTargetPlayer(playerIndex)
   playerIndex = tonumber(playerIndex) or 0
   M.targetPlayerIndex = playerIndex
-  if playerIndex == 1 then
-    M.color = {1, 0.5, 0}
-    M.floatingArrowColor = {1, 0.6, 0.1}
-  elseif playerIndex >= 2 then
-    M.color = {0, 1, 0.3}
-    M.floatingArrowColor = {0, 1, 0.4}
+  local isSplitActive = isSplitModeActive()
+  if isSplitActive then
+    if playerIndex == 1 then
+      M.color = {0.0, 0.55, 1.0} -- P2: Blue
+      M.floatingArrowColor = {0.0, 0.55, 1.0}
+    elseif playerIndex >= 2 then
+      M.color = {0, 1, 0.3}
+      M.floatingArrowColor = {0, 1, 0.4}
+    else
+      M.color = {1.0, 0.47, 0.08} -- P1: Orange
+      M.floatingArrowColor = {1.0, 0.55, 0.1}
+    end
   else
-    M.color = M.colorSets[M.colorSet] and M.colorSets[M.colorSet].decals or {0, 0.4, 1}
-    M.floatingArrowColor = M.colorSets[M.colorSet] and M.colorSets[M.colorSet].arrows or {0, 0.48, 0.77}
+    if playerIndex == 1 then
+      M.color = {1, 0.5, 0}
+      M.floatingArrowColor = {1, 0.6, 0.1}
+    elseif playerIndex >= 2 then
+      M.color = {0, 1, 0.3}
+      M.floatingArrowColor = {0, 1, 0.4}
+    else
+      M.color = M.colorSets[M.colorSet] and M.colorSets[M.colorSet].decals or {0, 0.4, 1}
+      M.floatingArrowColor = M.colorSets[M.colorSet] and M.colorSets[M.colorSet].arrows or {0, 0.48, 0.77}
+    end
   end
 
   M.routePlanner = getRoutePlanner(playerIndex)
@@ -130,7 +157,8 @@ end
 
 local decalScale = 3
 local function getNewData()
-  local c = M.color or {0, 0.4, 1}
+  local isSplit = isSplitModeActive()
+  local c = M.color or (isSplit and {1.0, 0.47, 0.08} or {0, 0.4, 1})
   -- create decals
   local data = {
     texture = 'art/shapes/arrows/arrow_groundmarkers_1.png',
@@ -139,8 +167,8 @@ local function getNewData()
     forwardVec = vec3(0, 0, 0),
     color = ColorF(c[1], c[2], c[3], 0 ),
     scale = vec3(0.5*decalScale, 1*decalScale, 2),
-    fadeStart = 100,
-    fadeEnd = 120
+    fadeStart = isSplit and 20000 or 100,
+    fadeEnd = isSplit and 25000 or 120
   }
   return data
 end
@@ -172,6 +200,7 @@ end
 local function generateDecalsForSegment(from, to, idx, first, colorRgb)
   local step = M.stepDistance or 3
   local last = M.startingStep - ceil(to.distToTarget / step)
+  local isSplit = isSplitModeActive()
   for i = first+1, last, 1 do
 
     local t = inverseLerp(M.startingStep-from.distToTarget/step, M.startingStep-to.distToTarget/step, i)
@@ -195,7 +224,10 @@ local function generateDecalsForSegment(from, to, idx, first, colorRgb)
       alpha = 1
     end
 
-    local c = colorRgb or M.color or {0, 0.4, 1}
+    M.decalPool[idx].fadeStart = isSplit and 20000 or 100
+    M.decalPool[idx].fadeEnd = isSplit and 25000 or 120
+
+    local c = colorRgb or M.color or (isSplit and {1.0, 0.47, 0.08} or {0, 0.4, 1})
     M.decalPool[idx].color.r = c[1]
     M.decalPool[idx].color.g = c[2]
     M.decalPool[idx].color.b = c[3]
@@ -237,8 +269,7 @@ local function generateRouteDecals(startPos)
     increaseDecalPool(320)
   end
 
-  local isSplitActive = (careerSplitScreen and careerSplitScreen.isActive and careerSplitScreen.isActive())
-    or (render_splitScreen and render_splitScreen.isEnabled and render_splitScreen.isEnabled())
+  local isSplitActive = isSplitModeActive()
 
   local nextIdx = 1
 
@@ -247,8 +278,8 @@ local function generateRouteDecals(startPos)
       if endWPByPlayer[pIdx] and rp and rp.path and #rp.path >= 2 then
         local pVeh = getTargetVeh(pIdx)
         local pPos = pVeh and pVeh:getPosition() or (rp.path and rp.path[1] and rp.path[1].pos) or core_camera.getPosition()
-        local pCol = (pIdx == 0) and (M.colorSets[M.colorSet] and M.colorSets[M.colorSet].decals or {0, 0.4, 1})
-          or ((pIdx == 1) and {1.0, 0.5, 0.05} or {0.1, 0.9, 0.3})
+        local pCol = (pIdx == 0) and {1.0, 0.47, 0.08} -- P1 Orange
+          or ((pIdx == 1) and {0.0, 0.55, 1.0} or {0.1, 0.9, 0.3}) -- P2 Blue
         nextIdx = generateDecalsForRoute(rp.path, pPos, nextIdx, pCol)
       end
     end
@@ -257,7 +288,8 @@ local function generateRouteDecals(startPos)
     if targetRp and targetRp.path and #targetRp.path >= 2 and endWPByPlayer[M.targetPlayerIndex or 0] then
       local veh = getTargetVeh(M.targetPlayerIndex)
       local pos = veh and veh:getPosition() or startPos or (targetRp.path and targetRp.path[1] and targetRp.path[1].pos) or core_camera.getPosition()
-      nextIdx = generateDecalsForRoute(targetRp.path, pos, nextIdx, M.color)
+      local defaultCol = M.color or (M.colorSets[M.colorSet] and M.colorSets[M.colorSet].decals or {0, 0.4, 1})
+      nextIdx = generateDecalsForRoute(targetRp.path, pos, nextIdx, defaultCol)
     end
   end
 
@@ -286,8 +318,14 @@ local function generateRouteDecals(startPos)
       local aVeh = getTargetVeh(arrowPIdx)
       local aPos = aVeh and aVeh:getPosition() or core_camera.getPosition()
       local totalDist = (aPos - arrowRp.path[1].pos):length() + (arrowRp.path[1].distToTarget or 0)
-      local arrowCol = (arrowPIdx == 0) and (M.colorSets[M.colorSet] and M.colorSets[M.colorSet].arrows or {0, 0.48, 0.77})
-        or ((arrowPIdx == 1) and {1, 0.6, 0.1} or {0, 1, 0.4})
+      local arrowCol
+      if isSplitActive then
+        arrowCol = (arrowPIdx == 0) and {1.0, 0.55, 0.1} -- P1 Orange
+          or ((arrowPIdx == 1) and {0.0, 0.55, 1.0} or {0, 1, 0.4}) -- P2 Blue
+      else
+        arrowCol = (arrowPIdx == 0) and (M.colorSets[M.colorSet] and M.colorSets[M.colorSet].arrows or {0, 0.48, 0.77})
+          or ((arrowPIdx == 1) and {1, 0.6, 0.1} or {0, 1, 0.4})
+      end
       M.floatingArrowColor = arrowCol
       core_groundMarkerArrows.updateArrows(arrowRp.path, totalDist)
     else
@@ -302,6 +340,7 @@ local appTimer = 0
 local appInterval = 0.25
 local lastGenerationPos
 local playerVehPos = vec3()
+local wasSplitActive = nil
 
 local function onPreRender(dt)
   if photoModeOpen then return end
@@ -320,8 +359,20 @@ local function onPreRender(dt)
     end
   end
 
-  local isSplitActive = (careerSplitScreen and careerSplitScreen.isActive and careerSplitScreen.isActive())
-    or (render_splitScreen and render_splitScreen.isEnabled and render_splitScreen.isEnabled())
+  local isSplitActive = isSplitModeActive()
+  if wasSplitActive ~= isSplitActive then
+    wasSplitActive = isSplitActive
+    lastGenerationPos = nil
+    table.clear(lastGenerationPosByPlayer)
+    local fs = isSplitActive and 20000 or 100
+    local fe = isSplitActive and 25000 or 120
+    for i = 1, M.decalPoolCount do
+      if M.decalPool[i] then
+        M.decalPool[i].fadeStart = fs
+        M.decalPool[i].fadeEnd = fe
+      end
+    end
+  end
 
   local needsRegen = false
   if freeroam_bigMapMode and freeroam_bigMapMode.bigMapActive() then
@@ -342,6 +393,7 @@ local function onPreRender(dt)
         end
       end
     else
+      local targetRp = getRoutePlanner(M.targetPlayerIndex or 0)
       local veh = getTargetVeh(M.targetPlayerIndex)
       local pos = veh and veh:getPosition() or (targetRp and targetRp.path and targetRp.path[1] and targetRp.path[1].pos) or core_camera.getPosition()
       if pos and (not lastGenerationPos or lastGenerationPos:distance(pos) > 1) then
@@ -394,7 +446,7 @@ local function sendToApp()
   local c = M.color or {0, 0.4, 1}
   local data = {
     markers = {},
-    color = string.format("#%02X%02X%02XFF", c[1]*255, c[2]*255, c[3]*255)
+    color = string.format("#%02X%02X%02XFF", math.floor(c[1]*255 + 0.5), math.floor(c[2]*255 + 0.5), math.floor(c[3]*255 + 0.5))
   }
   local id = 1
   if targetRp and targetRp.path then
@@ -422,8 +474,14 @@ local function setPath(wp, options)
 
   M.clearPathOnReachingTarget = options.clearPathOnReachingTarget
   M.stepDistance = options.step or 3
-  M.color = options.color or (pIdx == 1 and {1, 0.5, 0} or (pIdx >= 2 and {0, 1, 0.3} or M.colorSets[M.colorSet].decals))
-  M.floatingArrowColor = (pIdx == 1 and {1, 0.6, 0.1} or (pIdx >= 2 and {0, 1, 0.4} or M.colorSets[M.colorSet].arrows))
+  local isSplitActive = isSplitModeActive()
+  if isSplitActive then
+    M.color = options.color or (pIdx == 1 and {0.0, 0.55, 1.0} or (pIdx >= 2 and {0, 1, 0.3} or {1.0, 0.47, 0.08}))
+    M.floatingArrowColor = (pIdx == 1 and {0.0, 0.55, 1.0} or (pIdx >= 2 and {0, 1, 0.4} or {1.0, 0.55, 0.1}))
+  else
+    M.color = options.color or (pIdx == 1 and {1, 0.5, 0} or (pIdx >= 2 and {0, 1, 0.3} or (M.colorSets[M.colorSet] and M.colorSets[M.colorSet].decals or {0, 0.4, 1})))
+    M.floatingArrowColor = (pIdx == 1 and {1, 0.6, 0.1} or (pIdx >= 2 and {0, 1, 0.4} or (M.colorSets[M.colorSet] and M.colorSets[M.colorSet].arrows or {0, 0.48, 0.77})))
+  end
 
   M.cutOffDrivability = options.cutOffDrivability
   M.penaltyAboveCutoff = options.penaltyAboveCutoff
@@ -556,6 +614,9 @@ local function resetAll()
     if rp then rp:clear() end
   end
   table.clear(endWPByPlayer)
+  table.clear(lastGenerationPosByPlayer)
+  lastGenerationPos = nil
+  wasSplitActive = nil
   setPath(nil)
 
   decals = {}

@@ -33,9 +33,30 @@ local playerPalettes = {
 }
 
 local blendDistance = 75
+
+local function isSplitModeActive()
+  return (careerSplitScreen and careerSplitScreen.isActive and careerSplitScreen.isActive())
+    or (render_splitScreen and render_splitScreen.isEnabled and render_splitScreen.isEnabled())
+end
+
+local function getPlayerPalette(playerIndex)
+  playerIndex = playerIndex or 0
+  if isSplitModeActive() then
+    if playerIndex == 0 then
+      -- Split-screen: P1 route is Orange (matches P1 character)
+      return { fg = color(255, 120, 20, 255), bg = clrNavBg, r = 255, g = 120, b = 20 }
+    elseif playerIndex == 1 then
+      -- Split-screen: P2 route is Blue (matches P2 character)
+      return { fg = color(0, 140, 255, 255), bg = clrNavBg, r = 0, g = 140, b = 255 }
+    end
+  end
+  -- Default single player
+  return playerPalettes[playerIndex] or playerPalettes[0]
+end
+
 local function getRouteColor(distance, playerIndex)
   playerIndex = playerIndex or 0
-  local pal = playerPalettes[playerIndex] or playerPalettes[0]
+  local pal = getPlayerPalette(playerIndex)
   if distance > blendDistance then
     return pal.fg
   else
@@ -129,7 +150,7 @@ local function drawRoutePointer(td, playerIndex)
     return
   end
 
-  local pal = playerPalettes[playerIndex] or playerPalettes[0]
+  local pal = getPlayerPalette(playerIndex)
   ui_apps_minimap_utils.simpleCircleWithEdgePointer(route[#route].pos, pal.fg, pal.bg, 9)
 end
 

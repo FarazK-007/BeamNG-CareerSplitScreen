@@ -725,7 +725,7 @@ local function updateBigMapVehicles()
           icon = iconRenderer:getIconByName(iconName)
           if icon then
             if pIdx == 1 then
-              icon.color = ColorI(255, 140, 20, 255)
+              icon.color = ColorI(0, 140, 255, 255)
             else
               icon.color = ColorI(40, 220, 100, 255)
             end
@@ -798,15 +798,15 @@ local function drawBigMapPlayerSelector()
 
     for i, pIdx in ipairs(players) do
       local isSelected = (currentNavTarget == pIdx)
-      local pLabel = (pIdx == 0) and "P1 (Blue)" or ((pIdx == 1) and "P2 (Orange)" or ("P" .. tostring(pIdx + 1) .. " (Green)"))
+      local pLabel = (pIdx == 0) and "P1 (Orange)" or ((pIdx == 1) and "P2 (Blue)" or ("P" .. tostring(pIdx + 1) .. " (Green)"))
 
       if isSelected then
         if pIdx == 0 then
-          im.PushStyleColor1(im.Col_Button, im.GetColorU322(im.ImVec4(0.15, 0.45, 0.9, 0.95)))
-          im.PushStyleColor1(im.Col_ButtonHovered, im.GetColorU322(im.ImVec4(0.25, 0.55, 1.0, 1.0)))
+          im.PushStyleColor1(im.Col_Button, im.GetColorU322(im.ImVec4(0.95, 0.45, 0.05, 0.95)))
+          im.PushStyleColor1(im.Col_ButtonHovered, im.GetColorU322(im.ImVec4(1.0, 0.55, 0.15, 1.0)))
         elseif pIdx == 1 then
-          im.PushStyleColor1(im.Col_Button, im.GetColorU322(im.ImVec4(0.9, 0.45, 0.1, 0.95)))
-          im.PushStyleColor1(im.Col_ButtonHovered, im.GetColorU322(im.ImVec4(1.0, 0.55, 0.2, 1.0)))
+          im.PushStyleColor1(im.Col_Button, im.GetColorU322(im.ImVec4(0.10, 0.50, 0.95, 0.95)))
+          im.PushStyleColor1(im.Col_ButtonHovered, im.GetColorU322(im.ImVec4(0.20, 0.60, 1.0, 1.0)))
         else
           im.PushStyleColor1(im.Col_Button, im.GetColorU322(im.ImVec4(0.15, 0.75, 0.3, 0.95)))
           im.PushStyleColor1(im.Col_ButtonHovered, im.GetColorU322(im.ImVec4(0.25, 0.85, 0.4, 1.0)))

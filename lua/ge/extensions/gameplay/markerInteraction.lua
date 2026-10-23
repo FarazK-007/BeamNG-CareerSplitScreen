@@ -462,7 +462,7 @@ local function displayMultiseatTriggers(dtReal)
 end
 
 local function getPlayerDataForInteraction(pIdx, dtSim)
-  local playerVehicle = getPlayerVehicle(pIdx)
+  local playerVehicle = (pIdx == 1 and careerSplitScreen and careerSplitScreen.getP2Vehicle and careerSplitScreen.getP2Vehicle()) or getPlayerVehicle(pIdx)
   if not playerVehicle then return nil end
 
   local pData = {
@@ -520,15 +520,22 @@ local function isPlayerActuallyInsideMarker(marker, pData)
   if marker.checkParking and marker.pos then
     if pData.isWalking then return false end
     local dist = pData.vehPos:distance(marker.pos)
-    if dist > (marker.radius or 12) then return false end
-    if marker.xVec and marker.yVec and marker.zVec and pData.bbCenter and pData.bbHalfAxis0 then
-      if marker.mode == "contained" then
-        return containsOBB_OBB(marker.pos, marker.xVec, marker.yVec, marker.zVec, pData.bbCenter, pData.bbHalfAxis0, pData.bbHalfAxis1, pData.bbHalfAxis2)
-      else
-        return overlapsOBB_OBB(marker.pos, marker.xVec, marker.yVec, marker.zVec, pData.bbCenter, pData.bbHalfAxis0, pData.bbHalfAxis1, pData.bbHalfAxis2)
+    local maxDist = marker.scl and (math.max(marker.scl.x, marker.scl.y) + 3) or 8
+    if dist <= maxDist then
+      if marker.xVec and marker.yVec and marker.zVec and pData.bbCenter and pData.bbHalfAxis0 then
+        if marker.mode == "contained" then
+          if containsOBB_OBB(marker.pos, marker.xVec, marker.yVec, marker.zVec, pData.bbCenter, pData.bbHalfAxis0, pData.bbHalfAxis1, pData.bbHalfAxis2) then
+            return true
+          end
+        else
+          if overlapsOBB_OBB(marker.pos, marker.xVec, marker.yVec, marker.zVec, pData.bbCenter, pData.bbHalfAxis0, pData.bbHalfAxis1, pData.bbHalfAxis2) then
+            return true
+          end
+        end
       end
+      if dist <= 5.0 then return true end
     end
-    return dist <= 3.5
+    return false
   end
 
   -- 4. zoneMarker
@@ -651,7 +658,7 @@ local function evaluatePlayerInteractions(dtSim, clusterQt)
   end
 
   local p0Veh = getPlayerVehicle(0)
-  local p1Veh = getPlayerVehicle(1)
+  local p1Veh = (careerSplitScreen and careerSplitScreen.getP2Vehicle and careerSplitScreen.getP2Vehicle()) or getPlayerVehicle(1)
   if not p0Veh and not p1Veh then return end
 
   local activePlayers = {0}
@@ -707,13 +714,21 @@ local function evaluatePlayerInteractions(dtSim, clusterQt)
 end
 
 local function performInteract(targetPlayerIdx)
-  if targetPlayerIdx ~= nil and playerPrompts[targetPlayerIdx] then
+  if targetPlayerIdx ~= nil then
     local prompt = playerPrompts[targetPlayerIdx]
     if prompt and prompt.buttonFun then
       prompt.buttonFun()
       playerPrompts[targetPlayerIdx] = nil
       return true
     end
+    local otherIdx = (targetPlayerIdx == 0) and 1 or 0
+    local otherPrompt = playerPrompts[otherIdx]
+    if otherPrompt and otherPrompt.buttonFun then
+      otherPrompt.buttonFun()
+      playerPrompts[otherIdx] = nil
+      return true
+    end
+    return false
   end
 
   if playerPrompts[0] and playerPrompts[0].buttonFun then
@@ -765,7 +780,7 @@ local function displayMissionMarkers(level, dtSim, dtReal)
   local p0Veh = getPlayerVehicle(0)
   local p1Veh = nil
   if isSplit or isCareerModeActive() then
-    p1Veh = getPlayerVehicle(1)
+    p1Veh = (careerSplitScreen and careerSplitScreen.getP2Vehicle and careerSplitScreen.getP2Vehicle()) or getPlayerVehicle(1)
   end
 
   populateUpdateData(updateData0, p0Veh, 0, dtReal, dtSim, globalAlpha, bbPoints0)
