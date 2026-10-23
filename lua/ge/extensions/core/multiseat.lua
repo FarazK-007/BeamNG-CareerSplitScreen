@@ -241,6 +241,9 @@ local function getAssignedPlayers(devices, logEnabled, seatPlayers)
         player = lastAssignedPlayers[devname]
         if player == nil then player = manuallyAssignedPlayers[devname] end
       end
+      if (devname:startswith("keyboard") or devname:startswith("mouse")) and (player == nil or player < 0) then
+        player = 0
+      end
       stagedSafeAssignments[devname] = player ~= nil and player or -1
       assignPlayerToDevice(devname, stagedSafeAssignments[devname])
     end
@@ -284,10 +287,12 @@ local function getAssignedPlayers(devices, logEnabled, seatPlayers)
       player = platformDeviceGroupPlayers[getDeviceGroupId(devname, devices)] or 0
     elseif multiseat and isSplit then
       player = manuallyAssignedPlayers[devname] or (core_input_bindings and core_input_bindings.assignedPlayers and core_input_bindings.assignedPlayers[devname])
-      if player == nil then
-        if devname:startswith("keyboard") or devname:startswith("mouse") then
+      if devname:startswith("keyboard") or devname:startswith("mouse") then
+        if player == nil or player < 0 then
           player = 0
-        else
+        end
+      else
+        if player == nil then
           player = -1
         end
       end

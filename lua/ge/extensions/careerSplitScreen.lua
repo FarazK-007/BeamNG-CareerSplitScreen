@@ -757,9 +757,6 @@ local function ensureModExtensionsLoaded()
   if not gameplay_rawPois or not gameplay_rawPois._careerSplitScreenMod then
     pcall(function() extensions.reload("gameplay_rawPois") end)
   end
-  if not render_splitScreen or not render_splitScreen._careerSplitScreenMod then
-    pcall(function() extensions.reload("render_splitScreen") end)
-  end
 end
 
 local function getConnectedDevicesSummary()
@@ -846,6 +843,12 @@ local function ensureSinglePlayerInputState()
     end
   end
   isolateMenuActionMapsForPlayer0(false)
+  if core_input_actionFilter and core_input_actionFilter.addAction then
+    core_input_actionFilter.addAction(0, "splitScreenBlockedActions", false)
+  end
+  if extensions.isExtensionLoaded("render_splitScreen") and not isSplitActive then
+    extensions.unload("render_splitScreen")
+  end
 end
 
 local function autoAssignDevices()
@@ -1025,8 +1028,13 @@ local function startSplitScreen()
 
   -- 6. Load and initialize split screen render views
   extensions.load("render_splitScreen")
-  if render_splitScreen and render_splitScreen.setCustomPlayers then
-    render_splitScreen.setCustomPlayers({0, 1})
+  if render_splitScreen then
+    if render_splitScreen.enable then
+      render_splitScreen.enable()
+    end
+    if render_splitScreen.setCustomPlayers then
+      render_splitScreen.setCustomPlayers({0, 1})
+    end
   end
 
   -- 7. Re-verify seating
@@ -2780,8 +2788,8 @@ local function onPreRender(dt)
 end
 
 local function onExtensionLoaded(extName)
-  ensureSinglePlayerInputState()
   ensureModExtensionsLoaded()
+  ensureSinglePlayerInputState()
   patchReputationModule()
   setExtensionUnloadMode(M, "manual")
   hookBigMapMode()

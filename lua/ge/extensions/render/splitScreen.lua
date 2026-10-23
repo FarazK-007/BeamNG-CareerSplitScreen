@@ -379,6 +379,9 @@ local function disable(preserveRoute)
   end
   soloView = nil
   setActionBlocking(false)
+  if core_input_actionFilter and core_input_actionFilter.addAction then
+    core_input_actionFilter.addAction(0, blockedActionsGroup, false)
+  end
   customPlayers = nil
   uiState = nil
   lastParticipantRevision = -1
@@ -608,12 +611,23 @@ end
 
 local function onExtensionLoaded(data)
   setCustomPlayers(type(data) == "table" and data.customPlayers or nil)
+  if extensions.isExtensionLoaded("careerSplitScreen") then
+    if careerSplitScreen.isSplitModeActive and not careerSplitScreen.isSplitModeActive() then
+      log("I", "multiseatReload", "split-screen extension loaded but career split-screen is not active. Keeping idle.")
+      return
+    end
+  end
   enable()
   log("I", "multiseatReload", string.format(
     "split-screen extension loaded: serializedData=%s customPlayers=%d",
     tostring(type(data) == "table"),
     #(customPlayers or {})
   ))
+end
+
+local function onClientEndMission()
+  endSoloView()
+  disable()
 end
 
 M.getPlayers = getPlayers
@@ -629,6 +643,8 @@ M.getUiState = function() return uiState end
 M.getViews = function() return views end
 M.getSoloView = function() return soloView end
 M.isEnabled = function() return enabled end
+M.enable = enable
+M.disable = disable
 
 M.onExtensionLoaded = onExtensionLoaded
 M.onExtensionUnloaded = disable
@@ -638,7 +654,7 @@ M.onSettingsChanged = onSettingsChanged
 M.onBeforeBigMapActivated = onBeforeBigMapActivated
 M.onActivateBigMapCallback = onActivateBigMapCallback
 M.onDeactivateBigMapCallback = onDeactivateBigMapCallback
-M.onClientEndMission = endSoloView
+M.onClientEndMission = onClientEndMission
 M.onSerialize = onSerialize     -- tear down C++ views before a GE/Lua reload
 M.onDeserialized = onDeserialized
 
