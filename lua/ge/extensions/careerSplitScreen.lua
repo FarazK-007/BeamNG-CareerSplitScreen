@@ -641,32 +641,42 @@ end
 local origToggleBigMap = nil
 local origEnterBigMap = nil
 local origExitBigMap = nil
+local _bigMapToggling = false  -- re-entrancy guard to prevent RLS wrapper infinite recursion
 
 local function careerToggleBigMap(...)
-  if isSplitModeActive() or isCareerModeActive() then
-    if freeroam_bigMapMode and freeroam_bigMapMode.bigMapActive and freeroam_bigMapMode.bigMapActive() then
-      freeroam_bigMapMode.exitBigMap(true, true)
-      return
-    else
-      local rName = extensions.ui_router and extensions.ui_router.getCurrent and extensions.ui_router.getCurrent()
-      rName = rName and rName.resolved and rName.resolved.name
-      if rName == "multiseat" or rName == "play" or rName == "pause" or string.find(rName or "", "pause") or not rName then
-        if overhaul_phone_phone and overhaul_phone_phone.isPhoneOpen and overhaul_phone_phone.isPhoneOpen() then
-          overhaul_phone_phone.closePhone()
-        end
-        if freeroam_bigMapMode and freeroam_bigMapMode.enterBigMap then
-          freeroam_bigMapMode.enterBigMap({instant = true, forceOpen = true})
-        end
+  -- Re-entrancy guard: some wrappers (e.g. RLS toggleBigMapWrapper) call freeroam_bigMapMode.toggleBigMap()
+  -- which is now *this* function, causing infinite recursion. Block it.
+  if _bigMapToggling then return end
+  _bigMapToggling = true
+  local ok, err = pcall(function()
+    if isSplitModeActive() or isCareerModeActive() then
+      if freeroam_bigMapMode and freeroam_bigMapMode.bigMapActive and freeroam_bigMapMode.bigMapActive() then
+        freeroam_bigMapMode.exitBigMap(true, true)
         return
+      else
+        local rName = extensions.ui_router and extensions.ui_router.getCurrent and extensions.ui_router.getCurrent()
+        rName = rName and rName.resolved and rName.resolved.name
+        if rName == "multiseat" or rName == "play" or rName == "pause" or string.find(rName or "", "pause") or not rName then
+          if overhaul_phone_phone and overhaul_phone_phone.isPhoneOpen and overhaul_phone_phone.isPhoneOpen() then
+            overhaul_phone_phone.closePhone()
+          end
+          if freeroam_bigMapMode and freeroam_bigMapMode.enterBigMap then
+            freeroam_bigMapMode.enterBigMap({instant = true, forceOpen = true})
+          end
+          return
+        end
       end
     end
-  end
-  if origToggleBigMap and origToggleBigMap ~= careerToggleBigMap then
-    return origToggleBigMap(...)
-  end
-  if freeroam_bigMapMode and freeroam_bigMapMode.enterBigMap then
-    freeroam_bigMapMode.enterBigMap({instant = true, forceOpen = true})
-  end
+    if origToggleBigMap and origToggleBigMap ~= careerToggleBigMap then
+      origToggleBigMap(...)
+      return
+    end
+    if freeroam_bigMapMode and freeroam_bigMapMode.enterBigMap then
+      freeroam_bigMapMode.enterBigMap({instant = true, forceOpen = true})
+    end
+  end)
+  _bigMapToggling = false
+  if not ok then log("E", "careerSplitScreen", "careerToggleBigMap error: " .. tostring(err)) end
 end
 
 local function careerEnterBigMap(options, ...)
