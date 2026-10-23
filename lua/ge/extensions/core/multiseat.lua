@@ -35,6 +35,26 @@ local function isCareerModeActive()
     or (overhaul_career_career and overhaul_career_career.isActive and overhaul_career_career.isActive())
     or (core_gamestate and core_gamestate.state and (core_gamestate.state.state == "career" or core_gamestate.state.state == "overhaul"))
 end
+
+local function isSplitModeActive()
+  if extensions.isExtensionLoaded("careerSplitScreen") then
+    if careerSplitScreen.isSplitModeActive and careerSplitScreen.isSplitModeActive() then return true end
+    if careerSplitScreen.isActive and careerSplitScreen.isActive() then return true end
+  end
+  if extensions.isExtensionLoaded("render_splitScreen") and render_splitScreen.isEnabled and render_splitScreen.isEnabled() then
+    return true
+  end
+  return false
+end
+
+local function sanitizeMultiseatSetting()
+  if not isSplitModeActive() and not multiseatActive then
+    if settings and settings.getValue and settings.getValue("multiseat") then
+      settings.setValue("multiseat", false)
+    end
+  end
+end
+sanitizeMultiseatSetting()
 local joinedByPlayer = {}
 local personaOptInMode = false
 local participantRevision = 0
@@ -87,12 +107,12 @@ local function updateActivePlayers(devices, assignedPlayers)
   if multiseatActive then
     for _, entry in ipairs(joinedPlayers) do lookup[entry.playerIndex] = true end
   end
-  if (extensions.isExtensionLoaded("careerSplitScreen") and (careerSplitScreen.isSplitModeActive and careerSplitScreen.isSplitModeActive() or careerSplitScreen.isActive and careerSplitScreen.isActive()))
-     or (extensions.isExtensionLoaded("render_splitScreen") and render_splitScreen.isEnabled and render_splitScreen.isEnabled()) then
+  if isSplitModeActive() then
     lookup[0] = true
     lookup[1] = true
   end
-  if not next(lookup) and not settings.getValue("multiseat") then lookup[0] = true end
+  -- Player 0 must ALWAYS be active to prevent single-player input lockout (ESC, M, WASD, gamepad)
+  lookup[0] = true
 
   local players = tableKeys(lookup)
   table.sort(players)
@@ -250,23 +270,35 @@ local function getAssignedPlayers(devices, logEnabled, seatPlayers)
   local devnames = tableKeys(devices)
   table.sort(devnames)
   local platformManagesPlayers = isPlatformManagingPlayers()
-  if multiseat and not platformManagesPlayers then
+  local isSplit = isSplitModeActive() or multiseatActive
+  if multiseat and isSplit and not platformManagesPlayers then
     rememberManualDevices(lastDevices)
     rememberManualDevices(devices)
-  elseif multiseat and rememberPlatformDeviceGroups then
+  elseif multiseat and isSplit and rememberPlatformDeviceGroups then
     rememberPlatformDeviceGroups(devices)
   end
   local result = {}
   for _, devname in ipairs(devnames) do
     local player = 0
-    if multiseat and platformManagesPlayers then
-      player = platformDeviceGroupPlayers[getDeviceGroupId(devname, devices)] or -1
-    elseif multiseat then
-      player = manuallyAssignedPlayers[devname] or (core_input_bindings and core_input_bindings.assignedPlayers and core_input_bindings.assignedPlayers[devname]) or -1
+    if multiseat and isSplit and platformManagesPlayers then
+      player = platformDeviceGroupPlayers[getDeviceGroupId(devname, devices)] or 0
+    elseif multiseat and isSplit then
+      player = manuallyAssignedPlayers[devname] or (core_input_bindings and core_input_bindings.assignedPlayers and core_input_bindings.assignedPlayers[devname])
+      if player == nil then
+        if devname:startswith("keyboard") or devname:startswith("mouse") then
+          player = 0
+        else
+          player = -1
+        end
+      end
+    else
+      -- When split-screen / multiseat is NOT active, every device maps to Player 0!
+      -- This guarantees single-player controls (ESC, M, WASD, wheel, gamepad) work 100% reliably.
+      player = 0
     end
     result[devname] = player
   end
-  if multiseat and normalizePlayerAssignments then
+  if multiseat and isSplit and normalizePlayerAssignments then
     result = normalizePlayerAssignments(devices, result, not personaOptInMode)
   end
   for devname, player in pairs(result) do
@@ -1471,7 +1503,7 @@ local function reset()
   taggedRevision = nil
   coloredRevision = nil
 
-  if sessionOwnedMultiseat and settings.getValue("multiseat") then
+  if (sessionOwnedMultiseat or not isSplitModeActive()) and settings and settings.getValue and settings.getValue("multiseat") then
     settings.setValue("multiseat", false)
   end
 end
@@ -1574,5 +1606,10 @@ local function setDevicePlayer(devname, player)
   end
 end
 M.setDevicePlayer = setDevicePlayer
+
+local function onExtensionLoaded()
+  sanitizeMultiseatSetting()
+end
+M.onExtensionLoaded = onExtensionLoaded
 
 return M

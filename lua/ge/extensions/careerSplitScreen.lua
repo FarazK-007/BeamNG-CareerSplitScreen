@@ -764,59 +764,43 @@ local function ensureModExtensionsLoaded()
   end
 end
 
-local function autoAssignDevices()
-  if not core_input_bindings or not core_input_bindings.devices then return end
-  local devices = core_input_bindings.devices
-
-  local gamepads = {}
+local function getConnectedDevicesSummary()
+  local devices = (core_input_bindings and core_input_bindings.devices) or {}
   local keyboards = {}
   local mice = {}
+  local controllers = {}
 
   for devname, _ in pairs(devices) do
     local lname = string.lower(devname)
-    if string.find(lname, "xinput") or string.find(lname, "dinput") or string.find(lname, "joystick") or string.find(lname, "wheel") then
-      table.insert(gamepads, devname)
+    if string.find(lname, "mouse") then
+      table.insert(mice, devname)
     elseif string.find(lname, "keyboard") then
       table.insert(keyboards, devname)
-    elseif string.find(lname, "mouse") then
-      table.insert(mice, devname)
+    else
+      -- Gamepads, steering wheels, pedals, joysticks, xinput, dinput, etc.
+      table.insert(controllers, devname)
     end
   end
-  table.sort(gamepads)
+
   table.sort(keyboards)
   table.sort(mice)
+  table.sort(controllers)
 
-  local devMap = {}
+  return keyboards, controllers, mice
+end
 
-  if #gamepads >= 2 then
-    -- Two or more gamepads: P0 gets Gamepad 1, P1 gets Gamepad 2
-    devMap[gamepads[1]] = 0
-    devMap[gamepads[2]] = 1
-    for _, k in ipairs(keyboards) do devMap[k] = 0 end
-    for _, m in ipairs(mice) do devMap[m] = 0 end
-  elseif #gamepads == 1 then
-    -- Exactly 1 gamepad (keyboard0, mouse0, xinput0):
-    -- Player 0 gets Keyboard & Mouse
-    -- Player 1 gets Gamepad
-    for _, k in ipairs(keyboards) do devMap[k] = 0 end
-    for _, m in ipairs(mice) do devMap[m] = 0 end
-    devMap[gamepads[1]] = 1
-  else
-    -- 0 gamepads: Player 0 gets Keyboard & Mouse
-    for _, k in ipairs(keyboards) do devMap[k] = 0 end
-    for _, m in ipairs(mice) do devMap[m] = 0 end
+local function hasMultipleDevicesConnected()
+  local keyboards, controllers, _ = getConnectedDevicesSummary()
+  if #controllers >= 2 then
+    return true
   end
-
-  for devname, player in pairs(devMap) do
-    if core_multiseat and core_multiseat.setDevicePlayer then
-      core_multiseat.setDevicePlayer(devname, player)
-    end
-    if core_input_bindings and core_input_bindings.setPlayerToDevice then
-      core_input_bindings.setPlayerToDevice(devname, player)
-    end
+  if #keyboards >= 1 and #controllers >= 1 then
+    return true
   end
-
-  log("I", "careerSplitScreen", "Auto-assigned devices: " .. dumps(devMap):gsub("\n", ""):gsub("  ", " "))
+  if #keyboards >= 2 then
+    return true
+  end
+  return false
 end
 
 local function isolateMenuActionMapsForPlayer0(enable)
@@ -839,6 +823,86 @@ local function isolateMenuActionMapsForPlayer0(enable)
       core_input_actionFilter.clearActionMapPlayerMasks(owner)
     end
   end
+end
+
+local function ensureSinglePlayerInputState()
+  if isSplitActive then return end
+  if settings and settings.getValue and settings.getValue('multiseat') then
+    settings.setValue('multiseat', false)
+  end
+  if core_multiseat then
+    if core_multiseat.clearJoinedPlayers then core_multiseat.clearJoinedPlayers() end
+    if core_multiseat.setMultiseatActive then core_multiseat.setMultiseatActive(false) end
+  end
+  if core_input_bindings and core_input_bindings.devices then
+    for devname, _ in pairs(core_input_bindings.devices) do
+      if core_multiseat and core_multiseat.setDevicePlayer then
+        core_multiseat.setDevicePlayer(devname, 0)
+      end
+      if core_input_bindings.setPlayerToDevice then
+        core_input_bindings.setPlayerToDevice(devname, 0)
+      end
+    end
+    if core_input_bindings.refreshAssignedPlayers then
+      core_input_bindings.refreshAssignedPlayers(false, false)
+    end
+  end
+  isolateMenuActionMapsForPlayer0(false)
+end
+
+local function autoAssignDevices()
+  if not core_input_bindings or not core_input_bindings.devices then return end
+  local keyboards, controllers, mice = getConnectedDevicesSummary()
+
+  local devMap = {}
+
+  if #keyboards >= 1 and #controllers >= 1 then
+    -- Default configuration:
+    -- Keyboard (+ Mouse) -> Player 1 (Player index 0)
+    -- Next device (First controller / gamepad / wheel) -> Player 2 (Player index 1)
+    for _, k in ipairs(keyboards) do devMap[k] = 0 end
+    for _, m in ipairs(mice) do devMap[m] = 0 end
+    devMap[controllers[1]] = 1
+
+    -- If a second controller is connected, assign it to Player 1 as well (so P1 can use gamepad or keyboard)
+    if #controllers >= 2 then
+      devMap[controllers[2]] = 0
+    end
+    -- Any additional controllers remain unassigned (-1)
+    for i = 3, #controllers do
+      devMap[controllers[i]] = -1
+    end
+  elseif #controllers >= 2 then
+    -- No keyboards detected: Controller 1 -> Player 1, Controller 2 -> Player 2
+    devMap[controllers[1]] = 0
+    devMap[controllers[2]] = 1
+    for _, k in ipairs(keyboards) do devMap[k] = 0 end
+    for _, m in ipairs(mice) do devMap[m] = 0 end
+    for i = 3, #controllers do
+      devMap[controllers[i]] = -1
+    end
+  elseif #keyboards >= 2 then
+    -- Two keyboards: Keyboard 1 -> Player 1, Keyboard 2 -> Player 2
+    devMap[keyboards[1]] = 0
+    devMap[keyboards[2]] = 1
+    for _, m in ipairs(mice) do devMap[m] = 0 end
+  else
+    -- Fallback: assign all to Player 0
+    for _, k in ipairs(keyboards) do devMap[k] = 0 end
+    for _, m in ipairs(mice) do devMap[m] = 0 end
+    for _, c in ipairs(controllers) do devMap[c] = 0 end
+  end
+
+  for devname, player in pairs(devMap) do
+    if core_multiseat and core_multiseat.setDevicePlayer then
+      core_multiseat.setDevicePlayer(devname, player)
+    end
+    if core_input_bindings and core_input_bindings.setPlayerToDevice then
+      core_input_bindings.setPlayerToDevice(devname, player)
+    end
+  end
+
+  log("I", "careerSplitScreen", "Auto-assigned devices: " .. dumps(devMap):gsub("\n", ""):gsub("  ", " "))
 end
 
 local function startSplitScreen()
@@ -868,6 +932,25 @@ local function startSplitScreen()
       title = "Career Split-Screen",
       msg = "You must be inside or near a vehicle to start split-screen."
     })
+    return
+  end
+
+  -- Pre-flight check: Verify multiple controllable devices are connected
+  local keyboards, controllers, mice = getConnectedDevicesSummary()
+  if not hasMultipleDevicesConnected() then
+    if Engine and Engine.Audio and Engine.Audio.playOnce then
+      Engine.Audio.playOnce('AudioGui', 'event:>UI>Special>Error')
+    end
+    guihooks.trigger("toastrMsg", {
+      type = "error",
+      title = "Career Split-Screen",
+      msg = "No multiple devices connected! Please connect a controller, gamepad, or steering wheel for Player 2.",
+      config = { time = 6000 }
+    })
+    if ui_message then
+      ui_message("No multiple devices connected! Split-screen co-op requires at least two controllers, or a keyboard and a controller / steering wheel.", 6, "error", "gamepad")
+    end
+    log("W", "careerSplitScreen", string.format("Cannot start split-screen: insufficient devices connected (keyboards: %d, controllers/wheels: %d)", #keyboards, #controllers))
     return
   end
 
@@ -1072,14 +1155,7 @@ local function stopSplitScreen()
   extensions.unload("gameplay_traffic_source")
 
   -- Restore menu action map masks
-  isolateMenuActionMapsForPlayer0(false)
-
-  -- Deactivate multiseat
-  if core_multiseat then
-    core_multiseat.clearJoinedPlayers()
-    core_multiseat.setMultiseatActive(false)
-  end
-  settings.setValue('multiseat', false)
+  ensureSinglePlayerInputState()
 
   -- Restore UI gameplay route back to single-player "play"
   if extensions.ui_menuManager and extensions.ui_menuManager.setGameplayRoute then
@@ -1097,20 +1173,6 @@ local function stopSplitScreen()
     if core_camera then
       core_camera.resetCamera(0)
     end
-  end
-
-  -- Reset all devices to Player 0
-  if core_input_bindings and core_input_bindings.devices then
-    for devname, _ in pairs(core_input_bindings.devices) do
-      if core_multiseat and core_multiseat.setDevicePlayer then
-        core_multiseat.setDevicePlayer(devname, 0)
-      end
-      core_input_bindings.setPlayerToDevice(devname, 0)
-    end
-  end
-
-  if core_input_bindings and core_input_bindings.refreshAssignedPlayers then
-    core_input_bindings.refreshAssignedPlayers(false, false)
   end
 
   guihooks.trigger("toastrMsg", {
@@ -1517,6 +1579,8 @@ end
 local function onClientEndMission()
   if isSplitActive then
     stopSplitScreen()
+  else
+    ensureSinglePlayerInputState()
   end
   quickAccessInitialized = false
 end
@@ -1525,17 +1589,24 @@ local function onCareerActive(active)
   patchReputationModule()
   if not active and isSplitActive then
     stopSplitScreen()
+  elseif not isSplitActive then
+    ensureSinglePlayerInputState()
   end
   quickAccessInitialized = false
 end
 
 local function onOverhaulModeStarted(saveName)
+  if not isSplitActive then
+    ensureSinglePlayerInputState()
+  end
   quickAccessInitialized = false
 end
 
 local function onOverhaulModeStopped()
   if isSplitActive then
     stopSplitScreen()
+  else
+    ensureSinglePlayerInputState()
   end
   quickAccessInitialized = false
 end
@@ -1543,6 +1614,9 @@ end
 local function onGameStateUpdate(gameState)
   if gameState and (gameState.state == "career" or gameState.state == "overhaul") then
     quickAccessInitialized = false
+    if not isSplitActive then
+      ensureSinglePlayerInputState()
+    end
   elseif gameState and gameState.state == "freeroam" and isSplitActive then
     stopSplitScreen()
   end
@@ -2716,6 +2790,7 @@ local function onPreRender(dt)
 end
 
 local function onExtensionLoaded(extName)
+  ensureSinglePlayerInputState()
   ensureModExtensionsLoaded()
   patchReputationModule()
   setExtensionUnloadMode(M, "manual")
@@ -2724,6 +2799,9 @@ local function onExtensionLoaded(extName)
   log("I", "careerSplitScreen", "Career Split-Screen extension initialized.")
 end
 
+M.ensureSinglePlayerInputState = ensureSinglePlayerInputState
+M.hasMultipleDevicesConnected = hasMultipleDevicesConnected
+M.getConnectedDevicesSummary = getConnectedDevicesSummary
 M.ensureModExtensionsLoaded = ensureModExtensionsLoaded
 M.autoAssignDevices = autoAssignDevices
 M.startSplitScreen = startSplitScreen

@@ -34,7 +34,10 @@ Enables native, local split-screen multiplayer inside **BeamNG.drive Career Mode
 - **Auto-Spawn Loaner / Buddy Car**: If you only own a single vehicle in your save, the mod automatically spawns a guest loaner vehicle (Ibishu Covet) next to you so you can jump into co-op immediately.
 - **Passenger Ride-Along**: Player 2 can also spawn as a passenger in Player 1's car. Press **F** to step out, walk around, or hop into another car.
 
-### 🎮 Independent Controller Input & Interaction Prompts
+### 🎮 Intelligent Device Management & Input Protection
+- **Multiple Device Pre-Flight Check**: Automatically verifies that multiple controllable devices (e.g. Keyboard + Gamepad, Steering Wheel, or dual gamepads) are connected before launching split-screen. If only a single device is detected, co-op start is safely aborted with an informative notification so single-player controls are never disrupted.
+- **Smart Default Device Assignment**: Defaults **Keyboard & Mouse to Player 1** and assigns the **next connected device (controller/wheel) to Player 2**.
+- **Zero Input Lockout / Disconnection Guard**: Single-player controls (ESC pause menu, M map, driving keys) are 100% protected and remain fully operational across game boots and restarts. Devices are never left in an unassigned or disconnected state.
 - **Button (A) / Key Interaction**: Interactive world markers (drop-off parking spots, fuel pumps, garage doors, mission triggers) display on the screen of whichever player is in proximity.
 - **Controller Action Routing**: Controller button `(A)` and keyboard `[E]` work reliably for both players, with intelligent fallback routing to ensure Player 2 prompts are never dropped.
 - **Steering Isolation**: Steering inputs are isolated so Player 2 can freely turn and drive even when Player 1 is inside an interaction area.

@@ -368,6 +368,9 @@ local function disable(preserveRoute)
   if not enabled then return end
   extensions.hook("onSplitScreenChanged", false)
   enabled = false
+  if settings and settings.setValue then
+    settings.setValue('multiseat', false)
+  end
   if core_camera and core_camera.setInputTargetPlayer then
     core_camera.setInputTargetPlayer(nil)
   end
