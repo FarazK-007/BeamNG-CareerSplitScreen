@@ -3,6 +3,7 @@
 -- file, You can obtain one at http://beamng.com/bCDDL-1.1.txt
 
 local M = {}
+M._careerSplitScreenMod = true
 M.dependencies = {'gameplay_missions_missions', 'gameplay_missions_missionManager','freeroam_bigMapMode', 'gameplay_playmodeMarkers', 'freeroam_bigMapPoiProvider','ui_missionInfo'}
 
 local im = ui_imgui
@@ -201,6 +202,16 @@ local sortActivityData = function(a, b)
 end
 
 local function openViewDetailPrompt(elemData)
+  local isSplit = (extensions.isExtensionLoaded("careerSplitScreen") and (careerSplitScreen.isSplitModeActive and careerSplitScreen.isSplitModeActive() or careerSplitScreen.isActive and careerSplitScreen.isActive()))
+    or (extensions.isExtensionLoaded("render_splitScreen") and render_splitScreen.isEnabled and render_splitScreen.isEnabled())
+
+  if isSplit then
+    -- In split-screen mode, NEVER open the vanilla 2D ui_missionInfo dialogue!
+    -- Doing so triggers MenuActionMap and focusMoveScalar, hijacking Player 2's controller left analog stick (thumblx/thumbly) for menu navigation and preventing vehicle steering.
+    -- CareerSplitScreen provides independent, non-intrusive on-screen prompts for each player.
+    return
+  end
+
   local activityData = {}
   extensions.hook("onActivityAcceptGatherData", elemData, activityData)
 
@@ -242,26 +253,102 @@ local function onSettingsChanged()
 end
 M.onSettingsChanged = onSettingsChanged
 
-local p1, p2, p3, p4, p5, p6, p7, p8 = vec3(), vec3(), vec3(), vec3(), vec3(), vec3(), vec3(), vec3()
-local bbPoints = {}
-local function getBBPoints(bbCenter, bbAxis0, bbAxis1, bbAxis2)
-  p1:set(bbCenter) p1:setAdd(bbAxis0) p1:setAdd(bbAxis1) p1:setSub(bbAxis2)
-  p2:set(bbCenter) p2:setAdd(bbAxis0) p2:setAdd(bbAxis1) p2:setAdd(bbAxis2)
-  p3:set(bbCenter) p3:setSub(bbAxis0) p3:setAdd(bbAxis1) p3:setAdd(bbAxis2)
-  p4:set(bbCenter) p4:setSub(bbAxis0) p4:setAdd(bbAxis1) p4:setSub(bbAxis2)
-  p5:set(bbCenter) p5:setAdd(bbAxis0) p5:setSub(bbAxis1) p5:setSub(bbAxis2)
-  p6:set(bbCenter) p6:setAdd(bbAxis0) p6:setSub(bbAxis1) p6:setAdd(bbAxis2)
-  p7:set(bbCenter) p7:setSub(bbAxis0) p7:setSub(bbAxis1) p7:setAdd(bbAxis2)
-  p8:set(bbCenter) p8:setSub(bbAxis0) p8:setSub(bbAxis1) p8:setSub(bbAxis2)
-  bbPoints[1] = p1; bbPoints[2] = p2; bbPoints[3] = p3; bbPoints[4] = p4;
-  bbPoints[5] = p5; bbPoints[6] = p6; bbPoints[7] = p7; bbPoints[8] = p8;
-  return bbPoints
+local p0_1, p0_2, p0_3, p0_4, p0_5, p0_6, p0_7, p0_8 = vec3(), vec3(), vec3(), vec3(), vec3(), vec3(), vec3(), vec3()
+local bbPoints0 = {p0_1, p0_2, p0_3, p0_4, p0_5, p0_6, p0_7, p0_8}
+
+local p1_1, p1_2, p1_3, p1_4, p1_5, p1_6, p1_7, p1_8 = vec3(), vec3(), vec3(), vec3(), vec3(), vec3(), vec3(), vec3()
+local bbPoints1 = {p1_1, p1_2, p1_3, p1_4, p1_5, p1_6, p1_7, p1_8}
+
+local function getBBPoints(bbCenter, bbAxis0, bbAxis1, bbAxis2, points)
+  points = points or bbPoints0
+  points[1]:set(bbCenter) points[1]:setAdd(bbAxis0) points[1]:setAdd(bbAxis1) points[1]:setSub(bbAxis2)
+  points[2]:set(bbCenter) points[2]:setAdd(bbAxis0) points[2]:setAdd(bbAxis1) points[2]:setAdd(bbAxis2)
+  points[3]:set(bbCenter) points[3]:setSub(bbAxis0) points[3]:setAdd(bbAxis1) points[3]:setAdd(bbAxis2)
+  points[4]:set(bbCenter) points[4]:setSub(bbAxis0) points[4]:setAdd(bbAxis1) points[4]:setSub(bbAxis2)
+  points[5]:set(bbCenter) points[5]:setAdd(bbAxis0) points[5]:setSub(bbAxis1) points[5]:setSub(bbAxis2)
+  points[6]:set(bbCenter) points[6]:setAdd(bbAxis0) points[6]:setSub(bbAxis1) points[6]:setAdd(bbAxis2)
+  points[7]:set(bbCenter) points[7]:setSub(bbAxis0) points[7]:setSub(bbAxis1) points[7]:setAdd(bbAxis2)
+  points[8]:set(bbCenter) points[8]:setSub(bbAxis0) points[8]:setSub(bbAxis1) points[8]:setSub(bbAxis2)
+  return points
 end
 
 local veh
-
-local updateData = {}
+local updateData0 = {}
+local updateData1 = {}
+local updateData = updateData0
 local decals = {}
+
+local function populateUpdateData(targetData, v, pIdx, dtReal, dtSim, gAlpha, bbTable)
+  if v then
+    targetData.veh = v
+    targetData.vehPos = targetData.vehPos or vec3()
+    targetData.vehPos:set(v:getPositionXYZ())
+    targetData.vehPos2d = targetData.vehPos2d or vec3()
+    targetData.vehPos2d:set(targetData.vehPos)
+    targetData.vehPos2d.z = 0
+    targetData.vehVelocity = targetData.vehVelocity or vec3()
+    targetData.vehVelocity:set(v:getVelocityXYZ())
+
+    local vehId = v:getID()
+    targetData.bbCenter = targetData.bbCenter or vec3()
+    targetData.bbCenter:set(be:getObjectOOBBCenterXYZ(vehId))
+    targetData.bbHalfAxis0 = targetData.bbHalfAxis0 or vec3()
+    targetData.bbHalfAxis0:set(be:getObjectOOBBHalfAxisXYZ(vehId, 0))
+    targetData.bbHalfAxis1 = targetData.bbHalfAxis1 or vec3()
+    targetData.bbHalfAxis1:set(be:getObjectOOBBHalfAxisXYZ(vehId, 1))
+    targetData.bbHalfAxis2 = targetData.bbHalfAxis2 or vec3()
+    targetData.bbHalfAxis2:set(be:getObjectOOBBHalfAxisXYZ(vehId, 2))
+
+    targetData.bbPoints = getBBPoints(targetData.bbCenter, targetData.bbHalfAxis0, targetData.bbHalfAxis1, targetData.bbHalfAxis2, bbTable)
+    targetData.highestBBPointZ = math.max(targetData.bbPoints[2].z, math.max(targetData.bbPoints[3].z, math.max(targetData.bbPoints[6].z, targetData.bbPoints[7].z)))
+  else
+    targetData.veh = nil
+  end
+
+  targetData.camPos = targetData.camPos or vec3()
+  targetData.camRot = targetData.camRot or quat()
+  local ctxId = core_camera and core_camera.getContextIdForPlayer and core_camera.getContextIdForPlayer(pIdx)
+  if ctxId and core_camera.getPositionXYZ(ctxId) then
+    targetData.camPos:set(core_camera.getPositionXYZ(ctxId))
+    targetData.camRot:set(core_camera.getQuatXYZW(ctxId))
+  else
+    targetData.camPos:set(core_camera.getPositionXYZ())
+    targetData.camRot:set(core_camera.getQuatXYZW())
+  end
+
+  targetData.playerPosition = v and targetData.vehPos or targetData.camPos or vec3()
+
+  local playerVelocity = 0
+  if v and v.getVelocity then
+    local vObj = v:getVelocity()
+    playerVelocity = vObj and vObj:len() or 0
+  else
+    playerVelocity = getVelocity(dtSim, targetData.playerPosition, pIdx)
+  end
+
+  if v and v.getJBeamFilename and v:getJBeamFilename() == "unicycle" then
+    targetData.isWalking = true
+  elseif gameplay_walk and gameplay_walk.isWalking and gameplay_walk.isWalking(pIdx) then
+    targetData.isWalking = true
+  else
+    targetData.isWalking = false
+  end
+
+  local parkingSpeedFactor, isAtParkingSpeed, parkingSpeedChanged = getParkingSpeedFactor(playerVelocity)
+  local cruisingSpeedFactor, isAtcruisingSpeed, cruisingSpeedChanged = getCruisingSpeedFactor(playerVelocity)
+
+  targetData.parkingSpeedFactor = parkingSpeedFactor
+  targetData.cruisingSpeedFactor = cruisingSpeedFactor
+  targetData.isAtParkingSpeed = isAtParkingSpeed
+  targetData.parkingSpeedChanged = parkingSpeedChanged
+  targetData.dt = dtReal
+  targetData.globalAlpha = gAlpha
+  targetData.bigMapActive = freeroam_bigMapMode.bigMapActive()
+  targetData.bigmapTransitionActive = freeroam_bigMapMode.isTransitionActive()
+  targetData.isFreeCam = commands.isFreeCamera()
+  targetData.windowAspectRatio = screenRatio
+  targetData.screenHeight = screenHeight
+end
 local nearbyIds = {}
 local quadTreeSettings = {}
 local clustersById = {}
@@ -648,8 +735,8 @@ local function displayMissionMarkers(level, dtSim, dtReal)
     and core_multiseat.isMultiseatActive
     and core_multiseat.isMultiseatActive()
     or false
-  if isCareerModeActive() then
-    multiseatActive = false -- Keep full marker interactions in Career mode!
+  if isCareerModeActive() or (careerSplitScreen and careerSplitScreen.isActive and careerSplitScreen.isActive()) or (render_splitScreen and render_splitScreen.isEnabled and render_splitScreen.isEnabled()) then
+    multiseatActive = false -- Keep full marker interactions in Career mode and Split-Screen!
   end
   if multiseatActive then
     if not multiseatInteractionActive then
@@ -671,238 +758,92 @@ local function displayMissionMarkers(level, dtSim, dtReal)
   if activeMission then
     globalAlpha = 0
   end
+
+  local isSplit = (careerSplitScreen and (careerSplitScreen.isSplitModeActive and careerSplitScreen.isSplitModeActive() or careerSplitScreen.isActive and careerSplitScreen.isActive()))
+    or (render_splitScreen and render_splitScreen.isEnabled and render_splitScreen.isEnabled())
+
   local p0Veh = getPlayerVehicle(0)
   local p1Veh = nil
-  if isCareerModeActive() then
+  if isSplit or isCareerModeActive() then
     p1Veh = getPlayerVehicle(1)
   end
 
-  local selectedVeh = p0Veh
-  local selectedPlayerIdx = 0
-
-  if p1Veh and p1Veh ~= p0Veh then
-    local clusterQt = gameplay_playmodeMarkers and gameplay_playmodeMarkers.getPlaymodeClustersAsQuadtree and gameplay_playmodeMarkers.getPlaymodeClustersAsQuadtree()
-
-    local p0Pos = p0Veh and p0Veh:getPosition()
-    local p1Pos = p1Veh:getPosition()
-
-    local p0Speed = (p0Veh and p0Veh.getVelocity and p0Veh:getVelocity():len()) or 0
-    local p1Speed = (p1Veh.getVelocity and p1Veh:getVelocity():len()) or 0
-
-    local p0IsWalking = (p0Veh and p0Veh.getJBeamFilename and p0Veh:getJBeamFilename() == "unicycle")
-      or (gameplay_walk and gameplay_walk.isWalking and gameplay_walk.isWalking(0))
-    local p1IsWalking = (p1Veh.getJBeamFilename and p1Veh:getJBeamFilename() == "unicycle")
-      or (gameplay_walk and gameplay_walk.isWalking and gameplay_walk.isWalking(1))
-
-    local p0Stopped = p0IsWalking or p0Speed <= 2.0
-    local p1Stopped = p1IsWalking or p1Speed <= 2.0
-
-    local p0NearDist = 999999
-    local p1NearDist = 999999
-    local searchRad = 15
-    if clusterQt then
-      if p0Pos then
-        for id in clusterQt:queryNotNested(p0Pos.x - searchRad, p0Pos.y - searchRad, p0Pos.x + searchRad, p0Pos.y + searchRad) do
-          local cl = getClusterById(id)
-          if cl and cl.pos then
-            local d = p0Pos:distance(cl.pos)
-            if d < p0NearDist then p0NearDist = d end
-          else
-            p0NearDist = math.min(p0NearDist, 8)
-          end
-        end
-      end
-      if p1Pos then
-        for id in clusterQt:queryNotNested(p1Pos.x - searchRad, p1Pos.y - searchRad, p1Pos.x + searchRad, p1Pos.y + searchRad) do
-          local cl = getClusterById(id)
-          if cl and cl.pos then
-            local d = p1Pos:distance(cl.pos)
-            if d < p1NearDist then p1NearDist = d end
-          else
-            p1NearDist = math.min(p1NearDist, 8)
-          end
-        end
-      end
-    end
-
-    -- Player 0 (P1) is the HOST and ALWAYS has top priority if stopped/walking near a marker.
-    -- Player 1 (P2) is only selected if Player 0 is NOT near a marker (or moving fast), AND Player 1 IS stopped/walking near a marker.
-    local p0AtMarker = p0Stopped and (p0NearDist <= 12)
-    local p1AtMarker = p1Stopped and (p1NearDist <= 12)
-
-    if not p0AtMarker and p1AtMarker then
-      selectedVeh = p1Veh
-      selectedPlayerIdx = 1
-    else
-      selectedVeh = p0Veh
-      selectedPlayerIdx = 0
-    end
+  populateUpdateData(updateData0, p0Veh, 0, dtReal, dtSim, globalAlpha, bbPoints0)
+  if isSplit and p1Veh and p1Veh ~= p0Veh then
+    populateUpdateData(updateData1, p1Veh, 1, dtReal, dtSim, globalAlpha, bbPoints1)
   end
 
-  veh = selectedVeh
+  updateData = updateData0
+  veh = p0Veh
 
-  if veh then
-    updateData.veh = veh
-    updateData.vehPos = updateData.vehPos or vec3()
-    updateData.vehPos:set(veh:getPositionXYZ())
-    updateData.vehPos2d = updateData.vehPos2d or vec3()
-    updateData.vehPos2d:set(updateData.vehPos)
-    updateData.vehPos2d.z = 0
-    updateData.vehVelocity = updateData.vehVelocity or vec3()
-    updateData.vehVelocity:set(veh:getVelocityXYZ())
-
-    local vehId = veh:getID()
-    updateData.bbCenter = updateData.bbCenter or vec3()
-    updateData.bbCenter:set(be:getObjectOOBBCenterXYZ(vehId))
-    updateData.bbHalfAxis0 = updateData.bbHalfAxis0 or vec3()
-    updateData.bbHalfAxis0:set(be:getObjectOOBBHalfAxisXYZ(vehId, 0))
-    updateData.bbHalfAxis1 = updateData.bbHalfAxis1 or vec3()
-    updateData.bbHalfAxis1:set(be:getObjectOOBBHalfAxisXYZ(vehId, 1))
-    updateData.bbHalfAxis2 = updateData.bbHalfAxis2 or vec3()
-    updateData.bbHalfAxis2:set(be:getObjectOOBBHalfAxisXYZ(vehId, 2))
-
-    updateData.bbPoints = getBBPoints(updateData.bbCenter, updateData.bbHalfAxis0, updateData.bbHalfAxis1, updateData.bbHalfAxis2)
-
-    updateData.highestBBPointZ = math.max(updateData.bbPoints[2].z, math.max(updateData.bbPoints[3].z, math.max(updateData.bbPoints[6].z, updateData.bbPoints[7].z)))
-  else
-    updateData.veh = nil
-  end
-
-  updateData.playerPosition = veh and updateData.vehPos or updateData.camPos or vec3()
-
-
-  local playerVelocity = 0
-  if veh and veh.getVelocity then
-    local vObj = veh:getVelocity()
-    playerVelocity = vObj and vObj:len() or 0
-  else
-    playerVelocity = getVelocity(dtSim, updateData.playerPosition, selectedPlayerIdx)
-  end
-
-  if veh and veh.getJBeamFilename and veh:getJBeamFilename() == "unicycle" then
-    updateData.isWalking = true
-  elseif gameplay_walk and gameplay_walk.isWalking and gameplay_walk.isWalking(selectedPlayerIdx) then
-    updateData.isWalking = true
-  else
-    updateData.isWalking = false
-  end
-
-  profilerPushEvent("MissionEnter parkingSpeedFactor")
-  local parkingSpeedFactor, isAtParkingSpeed, parkingSpeedChanged = getParkingSpeedFactor(playerVelocity)
-  local cruisingSpeedFactor, isAtcruisingSpeed, cruisingSpeedChanged = getCruisingSpeedFactor(playerVelocity)
-
-
-  profilerPopEvent("MissionEnter parkingSpeedFactor")
-  -- put reference for icon manager in
-  updateData.parkingSpeedFactor = parkingSpeedFactor
-  updateData.cruisingSpeedFactor = cruisingSpeedFactor
-  updateData.dt = dtReal
-  updateData.globalAlpha = globalAlpha
-  updateData.camPos = updateData.camPos or vec3()
-  updateData.camRot = updateData.camRot or quat()
-  local ctxId = core_camera and core_camera.getContextIdForPlayer and core_camera.getContextIdForPlayer(selectedPlayerIdx)
-  if ctxId and core_camera.getPositionXYZ(ctxId) then
-    updateData.camPos:set(core_camera.getPositionXYZ(ctxId))
-    updateData.camRot:set(core_camera.getQuatXYZW(ctxId))
-  else
-    updateData.camPos:set(core_camera.getPositionXYZ())
-    updateData.camRot:set(core_camera.getQuatXYZW())
-  end
-  updateData.bigMapActive = freeroam_bigMapMode.bigMapActive()
-  updateData.bigmapTransitionActive = freeroam_bigMapMode.isTransitionActive()
-  updateData.isFreeCam = commands.isFreeCamera()
-  updateData.windowAspectRatio = screenRatio
-  updateData.screenHeight = screenHeight
-  -- TODO: Clean this up
   table.clear(nearbyIds)
-  -- hide all the markers behind the camera
   local maxRadius = 100
   profilerPushEvent("MissionEnter QTStuff")
-      -- transitioning or normal play mode
-  if   (not freeroam_bigMapMode.bigMapActive())
+  if (not freeroam_bigMapMode.bigMapActive())
     or (freeroam_bigMapMode.bigMapActive() and freeroam_bigMapMode.isTransitionActive()) then
     local clusterQt = gameplay_playmodeMarkers.getPlaymodeClustersAsQuadtree()
     evaluatePlayerInteractions(dtSim, clusterQt)
 
-    for id in clusterQt:queryNotNested(updateData.playerPosition.x-maxRadius, updateData.playerPosition.y-maxRadius, updateData.playerPosition.x+maxRadius, updateData.playerPosition.y + maxRadius) do
-      nearbyIds[id] = true
-    end
-
-    if isCareerModeActive() then
-      local p1Veh = getPlayerVehicle(1)
-      if p1Veh and p1Veh ~= veh then
-        local p1Pos = p1Veh:getPosition()
-        for id in clusterQt:queryNotNested(p1Pos.x-maxRadius, p1Pos.y-maxRadius, p1Pos.x+maxRadius, p1Pos.y+maxRadius) do
-          nearbyIds[id] = true
-        end
+    if updateData0.playerPosition then
+      for id in clusterQt:queryNotNested(updateData0.playerPosition.x-maxRadius, updateData0.playerPosition.y-maxRadius, updateData0.playerPosition.x+maxRadius, updateData0.playerPosition.y + maxRadius) do
+        nearbyIds[id] = true
       end
     end
 
-    if updateData.isFreeCam then
-      for id in clusterQt:queryNotNested(updateData.camPos.x-maxRadius, updateData.camPos.y-maxRadius, updateData.camPos.x+maxRadius, updateData.camPos.y + maxRadius) do
+    if isSplit and p1Veh and p1Veh ~= p0Veh and updateData1.playerPosition then
+      for id in clusterQt:queryNotNested(updateData1.playerPosition.x-maxRadius, updateData1.playerPosition.y-maxRadius, updateData1.playerPosition.x+maxRadius, updateData1.playerPosition.y + maxRadius) do
+        nearbyIds[id] = true
+      end
+    end
+
+    if updateData0.isFreeCam then
+      for id in clusterQt:queryNotNested(updateData0.camPos.x-maxRadius, updateData0.camPos.y-maxRadius, updateData0.camPos.x+maxRadius, updateData0.camPos.y + maxRadius) do
         nearbyIds[id] = true
       end
     end
   end
 
-  if M.navigationPoiId  then
+  if M.navigationPoiId then
     nearbyIds[M.navigationPoiId] = true
   end
 
   profilerPopEvent("MissionEnter QTStuff")
-  --table.clear(visibleIdsSorted)
-  --tableKeys(visibleIds, visibleIdsSorted)
-  --table.sort(visibleIdsSorted)
   profilerPopEvent("MissionEnter precalc")
 
-  -- now cleared at the end
-  --if not isAtParkingSpeed then
-    --table.clear(currentInteractableElements)
-  --end
-
   table.clear(decals)
-
   local decalCount = 0
   local careerActive = isCareerModeActive()
   local tutorialActive = gameplay_discover_freeroamTutorial_tutorial ~= nil
   table.clear(interactableElements)
   local showMissionMarkers = markersVisibleTemporary
   markerVisibilityBySetting.showMissionMarkers = (careerActive or tutorialActive or settings.getValue("showMissionMarkers"))
-  --markerVisibilityBySetting.enableDragRaceInFreeroam = (careerActive or settings.getValue("enableDragRaceInFreeroam"))
-  --markerVisibilityBySetting.enableDriftInFreeroam = (careerActive or settings.getValue("enableDriftInFreeroam"))
-  --markerVisibilityBySetting.enableGasStationsInFreeroam = (careerActive or settings.getValue("enableGasStationsInFreeroam"))
-  -- draw/show all visible markers.
-  --[[
-  if not timeSincePlayerTeleport then
-    timeSincePlayerTeleport = objectTeleported(updateData.camPos, lastCamPos, playerVelLast, dtReal) and 0.5
-  end
-  if timeSincePlayerTeleport then
-    timeSincePlayerTeleport = timeSincePlayerTeleport - dtReal
-    if timeSincePlayerTeleport <= 0 then timeSincePlayerTeleport = nil end
-  end]]
-  --local testId = "parkingMarker#/levels/west_coast_usa/facilities/delivery/mechanics.sites.json#exhaustShop_parking"
+
   local anyMarkerIsInAreaChanged = false
   for i, cluster in ipairs(gameplay_playmodeMarkers.getPlaymodeClusters()) do
     local marker = gameplay_playmodeMarkers.getMarkerForCluster(cluster)
     if nearbyIds[cluster.id] or marker.focus then
-      -- Check if the marker should be visible
       cluster.focus = cluster.focus or cluster.id == M.navigationPoiId
       local showMarker = not photoModeOpen
-      and not (editor and editor.active)
-      and (showMissionMarkers or cluster.focus)
+        and not (editor and editor.active)
+        and (showMissionMarkers or cluster.focus)
       showMarker = showMarker and (not cluster.visibleBySetting or markerVisibilityBySetting[cluster.visibleBySetting] or cluster.focus)
-      --dump(string.format("cluster %s, is nearby: %s, marker focus: %s, cluster focus: %s", cluster.id, nearbyIds[cluster.id], marker.focus, cluster.focus))
-      --dump(string.format("cluster %s, is showMarker: %s", cluster.id, showMarker))
-      --simpleDebugText3d(string.format("marker %s, is showMarker: %s", cluster.id, showMarker), cluster.pos)
-      if showMarker then
-        -- debug drawing for testing
-        --debugDrawer:drawTextAdvanced(marker.pos, String(tostring(cluster.id)), ColorF(1,1,1,1), true, false, ColorI(0,0,0,192))
-        --debugDrawer:drawSphere(cluster.pos, cluster.radius, ColorF(0.91,0.05,0.48,0.2))
-        marker:show()
-        marker:update(updateData)
-        -- post-marker decals, so they can be all drawn at once
 
-        -- TODO: optimize
+      if showMarker then
+        local currentData = updateData0
+        if isSplit and p1Veh and p1Veh ~= p0Veh and updateData1.vehPos and updateData0.vehPos then
+          local cPos = cluster.pos or (marker and marker.pos)
+          if cPos then
+            local d0 = updateData0.vehPos:squaredDistance(cPos)
+            local d1 = updateData1.vehPos:squaredDistance(cPos)
+            if d1 < d0 then
+              currentData = updateData1
+            end
+          end
+        end
+
+        marker:show()
+        marker:update(currentData)
+
         if marker.groundDecalData then
           if marker.groundDecalData.texture then
             decalCount = decalCount + 1
@@ -915,27 +856,26 @@ local function displayMissionMarkers(level, dtSim, dtReal)
           end
         end
 
-        if veh then
+        if currentData.veh then
           if not freeroam_bigMapMode.bigMapActive() and not activeMission and not
             (gameplay_drift_freeroam_driftSpots and gameplay_drift_freeroam_driftSpots.getIsInFreeroamChallenge()) then
             if marker.interactInPlayMode then
               local promptEmpty = not next(currentInteractableElements)
-              local canInteract = isAtParkingSpeed and (forceReevaluateOpenPrompt or parkingSpeedChanged or promptEmpty)
-              if updateData.isWalking then
+              local canInteract = currentData.isAtParkingSpeed and (forceReevaluateOpenPrompt or currentData.parkingSpeedChanged or promptEmpty)
+              if currentData.isWalking then
                 canInteract = marker.isInAreaChanged or forceReevaluateOpenPrompt or promptEmpty
                 if marker.isInAreaChanged then
                   anyMarkerIsInAreaChanged = marker.isInAreaChanged
                 end
               end
 
-              updateData.canInteract = canInteract
-              if updateData.canInteract then
-                marker:interactInPlayMode(updateData, interactableElements)
+              currentData.canInteract = canInteract
+              if currentData.canInteract then
+                marker:interactInPlayMode(currentData, interactableElements)
               end
-              --simpleDebugText3d(dumps(marker.cluster.clusterId), marker.cluster.pos, 0.25)
             end
             if marker.interactWhileMoving then
-              marker:interactWhileMoving(updateData)
+              marker:interactWhileMoving(currentData)
             end
           end
         end
@@ -946,11 +886,11 @@ local function displayMissionMarkers(level, dtSim, dtReal)
       marker:hide()
     end
   end
-  lastCamPos:set(updateData.camPos)
-  if veh then
-    playerVelLast:set(be:getObjectVelocityXYZ(veh:getID()))
+
+  lastCamPos:set(updateData0.camPos)
+  if p0Veh then
+    playerVelLast:set(be:getObjectVelocityXYZ(p0Veh:getID()))
   end
-  --print("Force forceReevaluateOpenPrompt " .. dumps(forceReevaluateOpenPrompt))
   forceReevaluateOpenPrompt = false
   if next(interactableElements) then
     table.clear(currentInteractableElements)
@@ -960,14 +900,14 @@ local function displayMissionMarkers(level, dtSim, dtReal)
     openViewDetailPrompt(interactableElements)
   end
   if not activeMission and not next(interactableElements) then
-    if updateData.isWalking then
+    if updateData0.isWalking then
       if anyMarkerIsInAreaChanged == "out" then
         table.clear(currentInteractableElements)
         closeViewDetailPrompt(true)
       end
-    elseif not isAtParkingSpeed or parkingSpeedChanged then
+    elseif not updateData0.isAtParkingSpeed or updateData0.parkingSpeedChanged then
       table.clear(currentInteractableElements)
-      closeViewDetailPrompt(parkingSpeedChanged)
+      closeViewDetailPrompt(updateData0.parkingSpeedChanged)
     end
   end
   skipIconFading = false
@@ -1192,14 +1132,30 @@ local function drawInteractPromptForPlayer(player, prompt, rect, canvasPosX, can
     im.PushStyleColor1(im.Col_Border, im.GetColorU322(im.ImVec4(0.65, 0.72, 0.82, 0.75)))
     im.PushStyleColor1(im.Col_Text, im.GetColorU322(im.ImVec4(0.96, 0.97, 0.98, 1.0)))
 
-    im.Button(keyDisplay)
+    local drawList = im.GetWindowDrawList()
+    local winPos = im.GetWindowPos()
+    local keyBadgePadX = 8
+    local keyBadgeW = math.max(26, keySize.x + keyBadgePadX * 2)
+    local keyBadgeH = 22
+    local padX = 10
+    local badgeMin = im.ImVec2(winPos.x + padX, winPos.y + (boxH - keyBadgeH) * 0.5)
+    local badgeMax = im.ImVec2(winPos.x + padX + keyBadgeW, winPos.y + (boxH + keyBadgeH) * 0.5)
 
-    im.PopStyleColor(5)
-    im.PopStyleVar(3)
+    -- Pure visual drawing for key badge: NO im.Button widget, preventing gamepad stick navigation lock!
+    drawList:AddRectFilled(badgeMin, badgeMax, im.GetColorU322(im.ImVec4(0.95, 0.45, 0.10, 0.95)), 4, 0)
+    drawList:AddRect(badgeMin, badgeMax, im.GetColorU322(im.ImVec4(1.0, 0.65, 0.30, 0.85)), 4, 0, 1)
 
-    im.SameLine()
-    im.SetCursorPosY(im.GetCursorPosY() + 2)
-    im.TextColored(im.ImVec4(0.92, 0.93, 0.96, 1.0), heading)
+    -- Key text inside badge
+    local keyTextX = padX + (keyBadgeW - keySize.x) * 0.5
+    local keyTextY = (boxH - keySize.y) * 0.5
+    im.SetCursorPos(im.ImVec2(keyTextX, keyTextY))
+    im.TextColored(im.ImVec4(1.0, 1.0, 1.0, 1.0), keyDisplay)
+
+    -- Action label next to badge
+    local labelTextX = padX + keyBadgeW + 10
+    local labelTextY = (boxH - headingSize.y) * 0.5
+    im.SetCursorPos(im.ImVec2(labelTextX, labelTextY))
+    im.TextColored(im.ImVec4(0.95, 0.96, 0.98, 1.0), heading)
   end
   im.End()
 

@@ -5,6 +5,7 @@
 require("utils")
 local splitScreenLayouts = require("ge/extensions/render/splitScreenLayouts")
 local M = {}
+M._careerSplitScreenMod = true
 M.dependencies = {
   "core_playerPersonas",
   "render_playerTags",

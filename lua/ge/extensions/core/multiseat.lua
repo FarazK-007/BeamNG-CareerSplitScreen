@@ -4,6 +4,7 @@
 
 require("utils")
 local M = {}
+M._careerSplitScreenMod = true
 M.allowTrafficDebug = false
 
 M.dependencies = {
@@ -86,7 +87,8 @@ local function updateActivePlayers(devices, assignedPlayers)
   if multiseatActive then
     for _, entry in ipairs(joinedPlayers) do lookup[entry.playerIndex] = true end
   end
-  if isCareerModeActive() and extensions.isExtensionLoaded("careerSplitScreen") and careerSplitScreen.isActive() then
+  if (extensions.isExtensionLoaded("careerSplitScreen") and (careerSplitScreen.isSplitModeActive and careerSplitScreen.isSplitModeActive() or careerSplitScreen.isActive and careerSplitScreen.isActive()))
+     or (extensions.isExtensionLoaded("render_splitScreen") and render_splitScreen.isEnabled and render_splitScreen.isEnabled()) then
     lookup[0] = true
     lookup[1] = true
   end
@@ -98,7 +100,7 @@ local function updateActivePlayers(devices, assignedPlayers)
   local signature = assignmentSignature(devices, assignedPlayers)
 
   activePlayers = players
-  lastDevices = devices or {}
+  lastDevices = devices or (core_input_bindings and core_input_bindings.devices) or {}
   lastAssignedPlayers = shallowcopy(assignedPlayers)
   local rosterChanged = syncJoinedPlayers and syncJoinedPlayers() or false
   if syncAutomaticPersonas and not personaOptInMode then
@@ -281,7 +283,7 @@ local function getAssignedPlayers(devices, logEnabled, seatPlayers)
 
   -- re-seat all players in vehicles when requested
   local potentialSeatChanges = changed or multiseat -- skip re-seating players when there's no chance they'll end in a different car
-  if isCareerModeActive() then
+  if isCareerModeActive() or (extensions.isExtensionLoaded("careerSplitScreen") and (careerSplitScreen.isSplitModeActive and careerSplitScreen.isSplitModeActive() or careerSplitScreen.isActive and careerSplitScreen.isActive())) then
     seatPlayers = false
   end
   if potentialSeatChanges and seatPlayers then
@@ -395,6 +397,27 @@ local function getDevicesByPlayer(devices, assignedPlayers)
     devices = devices or lastDevices
     assignedPlayers = assignedPlayers or lastAssignedPlayers
   end
+
+  local effectiveDevices = shallowcopy(devices or {})
+  if core_input_bindings and core_input_bindings.devices then
+    for devname, info in pairs(core_input_bindings.devices) do
+      if effectiveDevices[devname] == nil then
+        effectiveDevices[devname] = info
+      end
+    end
+  end
+  devices = effectiveDevices
+
+  local effectiveAssigned = shallowcopy(assignedPlayers or {})
+  if core_input_bindings and core_input_bindings.assignedPlayers then
+    for devname, plyr in pairs(core_input_bindings.assignedPlayers) do
+      if effectiveAssigned[devname] == nil and plyr ~= nil and plyr >= 0 then
+        effectiveAssigned[devname] = plyr
+      end
+    end
+  end
+  assignedPlayers = effectiveAssigned
+
   local result = {}
   for devname, player in pairs(assignedPlayers) do
     if player ~= nil and player >= 0 then
@@ -403,18 +426,22 @@ local function getDevicesByPlayer(devices, assignedPlayers)
       if (not productName or productName == "") and Input and Input.getProductName then
         productName = Input.getProductName(devname)
       end
+      local isConnected = (devices and devices[devname] ~= nil)
+        or (lastDevices and lastDevices[devname] ~= nil)
+        or (core_input_bindings and core_input_bindings.devices and core_input_bindings.devices[devname] ~= nil)
+
       result[player] = result[player] or {}
       result[player][#result[player] + 1] = {
         id = devname,
         productName = translateDeviceName(productName or devname),
         controllerIndex = tonumber(string.match(devname, "(%d+)$")),
-        connected = lastDevices[devname] ~= nil,
+        connected = isConnected,
         metadata = deviceMetadata(devname, info),
       }
     end
   end
-  for _, devices in pairs(result) do
-    table.sort(devices, function(a, b) return a.id < b.id end)
+  for _, devs in pairs(result) do
+    table.sort(devs, function(a, b) return a.id < b.id end)
   end
   return result
 end
@@ -733,7 +760,8 @@ local function getJoinedPlayers()
 end
 
 local function isPlayerActive(player)
-  if isCareerModeActive() and extensions.isExtensionLoaded("careerSplitScreen") and careerSplitScreen.isActive() then
+  if (extensions.isExtensionLoaded("careerSplitScreen") and (careerSplitScreen.isSplitModeActive and careerSplitScreen.isSplitModeActive() or careerSplitScreen.isActive and careerSplitScreen.isActive()))
+     or (extensions.isExtensionLoaded("render_splitScreen") and render_splitScreen.isEnabled and render_splitScreen.isEnabled()) then
     if player == 0 or player == 1 then return true end
   end
   for _, activePlayer in ipairs(activePlayers) do
@@ -1199,7 +1227,7 @@ local function applyConfiguration(config)
       }
     end
 
-    lastDevices = devices or {}
+    lastDevices = devices or (core_input_bindings and core_input_bindings.devices) or {}
     lastAssignedPlayers = deepcopy(resolved.assignments)
     lastAssignmentSignature = assignmentSignature(lastDevices, lastAssignedPlayers)
     local devicesByPlayer = getDevicesByPlayer(lastDevices, lastAssignedPlayers)

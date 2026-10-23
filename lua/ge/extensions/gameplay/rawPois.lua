@@ -3,6 +3,7 @@
 -- file, You can obtain one at http://beamng.com/bCDDL-1.1.txt
 
 local M = {}
+M._careerSplitScreenMod = true
 
 local rawPoiGeneration = 0
 local rawPoiListByLevel = {}
@@ -21,13 +22,8 @@ local function isCareerModeActive()
 end
 
 local function isMultiseatActive()
-  if isCareerModeActive() then
-    return false -- Never filter out Career POIs during career mode!
-  end
-  return core_multiseat
-    and core_multiseat.isMultiseatActive
-    and core_multiseat.isMultiseatActive()
-    or false
+  -- Never filter out POIs or markers in split screen; all garages, missions, and POIs remain visible
+  return false
 end
 
 local function syncMultiseatState()
