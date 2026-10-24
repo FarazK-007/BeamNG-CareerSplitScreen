@@ -1302,11 +1302,15 @@ local function buildMultiseatActions(context, registerButton)
     or (core_gamestate and core_gamestate.state and (core_gamestate.state.state == "career" or core_gamestate.state.state == "overhaul"))
     or (context.mode == "career" or context.mode == "overhaul")
 
-  local isSplitRunning
+  local isSplitRunning = false
   if isCareer then
-    isSplitRunning = bool(careerSplitScreen and careerSplitScreen.isActive and careerSplitScreen.isActive())
+    if careerSplitScreen and careerSplitScreen.isActive and careerSplitScreen.isActive() then
+      isSplitRunning = true
+    end
   else
-    isSplitRunning = bool((careerSplitScreen and careerSplitScreen.isActive and careerSplitScreen.isActive()) or (context and context.isMultiseatActive))
+    if (careerSplitScreen and careerSplitScreen.isActive and careerSplitScreen.isActive()) or (context and context.isMultiseatActive) then
+      isSplitRunning = true
+    end
   end
 
   if (context.mode == "freeroam" or context.mode == "career" or context.mode == "overhaul") and not isSplitRunning then
