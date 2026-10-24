@@ -22,4 +22,9 @@ if careerSplitScreen and careerSplitScreen.patchReputationModule then
   careerSplitScreen.patchReputationModule()
 end
 
+-- 5. Reload core_groundMarkers from mod to enable multi-player routing
+if extensions and extensions.reload then
+  extensions.reload("core_groundMarkers")
+end
+
 log("I", "careerSplitScreen", "Career Split-Screen extension mounted and input state verified.")

@@ -17,6 +17,14 @@ local p2IsWalking = false
 local guestVehicleId = nil
 local quickAccessInitialized = false
 
+-- Forward declarations to ensure file-wide availability
+local performInteract = nil
+local getRouteTargetPlayer = nil
+local setRouteTargetPlayer = nil
+local toggleRouteTarget = nil
+local ensureGroundMarkersLoaded = nil
+local hookCoreGroundMarkers = nil
+
 local cachedKeyPrompts = {}
 local function invalidateKeyPromptCache()
   table.clear(cachedKeyPrompts)
@@ -415,6 +423,97 @@ local function hookCareerJobsAndLogistics()
   end
 end
 
+local selectedRoutePlayer = 0
+
+hookCoreGroundMarkers = function()
+  if not core_groundMarkers then return end
+  if core_groundMarkers._careerSplitHooked then return end
+  core_groundMarkers._careerSplitHooked = true
+
+  core_groundMarkers.targetPlayerIndex = core_groundMarkers.targetPlayerIndex or selectedRoutePlayer or 0
+
+  if not core_groundMarkers.getTargetPlayer then
+    core_groundMarkers.getTargetPlayer = function()
+      return core_groundMarkers.targetPlayerIndex or selectedRoutePlayer or 0
+    end
+  end
+
+  if not core_groundMarkers.setTargetPlayer then
+    core_groundMarkers.setTargetPlayer = function(pIdx)
+      pIdx = tonumber(pIdx) or 0
+      selectedRoutePlayer = pIdx
+      core_groundMarkers.targetPlayerIndex = pIdx
+      if pIdx == 1 then
+        core_groundMarkers.color = {0.0, 0.55, 1.0}
+        core_groundMarkers.floatingArrowColor = {0.0, 0.55, 1.0}
+      else
+        core_groundMarkers.color = {1.0, 0.47, 0.08}
+        core_groundMarkers.floatingArrowColor = {1.0, 0.55, 0.1}
+      end
+      if freeroam_bigMapMode and freeroam_bigMapMode.resetRoute then
+        freeroam_bigMapMode.resetRoute()
+      end
+    end
+  end
+
+  if not core_groundMarkers.clearPathForPlayer then
+    core_groundMarkers.clearPathForPlayer = function(pIdx)
+      pIdx = pIdx or (core_groundMarkers.getTargetPlayer and core_groundMarkers.getTargetPlayer()) or 0
+      if core_groundMarkers.setPath then
+        core_groundMarkers.setPath(nil, {playerIndex = pIdx})
+      end
+    end
+  end
+end
+
+ensureGroundMarkersLoaded = function()
+  if not core_groundMarkers or not core_groundMarkers.setTargetPlayer then
+    log("I", "careerSplitScreen", "core_groundMarkers missing multi-player routing; reloading extension from mod...")
+    pcall(function()
+      if extensions and extensions.reload then
+        extensions.reload("core_groundMarkers")
+      end
+    end)
+  end
+
+  if core_groundMarkers and not core_groundMarkers.setTargetPlayer then
+    log("W", "careerSplitScreen", "Reload did not provide setTargetPlayer, injecting runtime hooks...")
+    hookCoreGroundMarkers()
+  end
+end
+
+getRouteTargetPlayer = function()
+  if core_groundMarkers and core_groundMarkers.getTargetPlayer then
+    local p = core_groundMarkers.getTargetPlayer()
+    if p ~= nil then return p end
+  end
+  return selectedRoutePlayer or 0
+end
+
+setRouteTargetPlayer = function(pIdx)
+  pIdx = tonumber(pIdx) or 0
+  selectedRoutePlayer = pIdx
+  ensureGroundMarkersLoaded()
+  if core_groundMarkers and core_groundMarkers.setTargetPlayer then
+    core_groundMarkers.setTargetPlayer(pIdx)
+  end
+  Engine.Audio.playOnce('AudioGui', 'event:>UI>Main>select')
+end
+
+toggleRouteTarget = function()
+  local cur = getRouteTargetPlayer()
+  local nxt = (cur == 0) and 1 or 0
+  setRouteTargetPlayer(nxt)
+  if guihooks and guihooks.trigger then
+    guihooks.trigger('toastrMsg', {
+      type = 'info',
+      title = 'Map Route Target',
+      msg = (nxt == 0 and 'Routing for Player 1 (Orange)' or 'Routing for Player 2 (Blue)'),
+      config = {timeOut = 1500}
+    })
+  end
+end
+
 local function selectAtCursor()
   if not freeroam_bigMapMode or not freeroam_bigMapMode.bigMapActive() then return end
 
@@ -441,7 +540,7 @@ local function selectAtCursor()
   local hitDist = castRayStatic(ray.pos, ray.dir, 50000)
   if hitDist < 50000 then
     local hitPos = ray.pos + ray.dir * hitDist
-    local currentTarget = (core_groundMarkers and core_groundMarkers.getTargetPlayer and core_groundMarkers.getTargetPlayer()) or 0
+    local currentTarget = getRouteTargetPlayer()
     if core_groundMarkers and core_groundMarkers.currentlyHasTarget and core_groundMarkers.currentlyHasTarget(currentTarget) then
       freeroam_bigMapMode.setNavFocus(nil)
     else
@@ -466,22 +565,6 @@ local function bindBigMapSelectKeys()
         end)
       end
     end
-  end
-end
-
-local function toggleRouteTarget()
-  if not core_groundMarkers or not core_groundMarkers.getTargetPlayer or not core_groundMarkers.setTargetPlayer then return end
-  local cur = core_groundMarkers.getTargetPlayer()
-  local nxt = (cur == 0) and 1 or 0
-  core_groundMarkers.setTargetPlayer(nxt)
-  Engine.Audio.playOnce('AudioGui', 'event:>UI>Main>select')
-  if guihooks and guihooks.trigger then
-    guihooks.trigger('toastrMsg', {
-      type = 'info',
-      title = 'Map Route Target',
-      msg = (nxt == 0 and 'Routing for Player 1 (Orange)' or 'Routing for Player 2 (Blue)'),
-      config = {timeOut = 1500}
-    })
   end
 end
 
@@ -515,6 +598,8 @@ local function drawBigMapPlayerSelector()
   local im = ui_imgui
   if not im then return end
 
+  ensureGroundMarkersLoaded()
+
   local canvas = scenetree.findObject("Canvas")
   local winW, winH = 1920, 1080
   if canvas and canvas.getWindowClientSizeXY then
@@ -523,11 +608,15 @@ local function drawBigMapPlayerSelector()
 
   local btnW = 125
   local btnH = 34
-  local currentNavTarget = (core_groundMarkers and core_groundMarkers.getTargetPlayer and core_groundMarkers.getTargetPlayer()) or 0
+  local currentNavTarget = getRouteTargetPlayer()
 
-  local hasTargetRoute = core_groundMarkers and core_groundMarkers.currentlyHasTarget and core_groundMarkers.currentlyHasTarget(currentNavTarget)
-  if not hasTargetRoute and core_groundMarkers and core_groundMarkers.getPathForPlayer then
-    hasTargetRoute = (core_groundMarkers.getPathForPlayer(currentNavTarget) ~= nil)
+  local hasTargetRoute = false
+  if core_groundMarkers then
+    if core_groundMarkers.currentlyHasTarget then
+      hasTargetRoute = core_groundMarkers.currentlyHasTarget(currentNavTarget)
+    elseif core_groundMarkers.getPathForPlayer then
+      hasTargetRoute = (core_groundMarkers.getPathForPlayer(currentNavTarget) ~= nil)
+    end
   end
 
   local barW = hasTargetRoute and 540 or 460
@@ -582,10 +671,7 @@ local function drawBigMapPlayerSelector()
     end
 
     if im.Button("P1 (Orange)###btn_nav_p1", im.ImVec2(btnW, btnH)) then
-      if core_groundMarkers and core_groundMarkers.setTargetPlayer then
-        core_groundMarkers.setTargetPlayer(0)
-        Engine.Audio.playOnce('AudioGui', 'event:>UI>Main>select')
-      end
+      setRouteTargetPlayer(0)
     end
     im.PopStyleColor(3)
 
@@ -604,10 +690,7 @@ local function drawBigMapPlayerSelector()
     end
 
     if im.Button("P2 (Blue)###btn_nav_p2", im.ImVec2(btnW, btnH)) then
-      if core_groundMarkers and core_groundMarkers.setTargetPlayer then
-        core_groundMarkers.setTargetPlayer(1)
-        Engine.Audio.playOnce('AudioGui', 'event:>UI>Main>select')
-      end
+      setRouteTargetPlayer(1)
     end
     im.PopStyleColor(3)
 
@@ -618,8 +701,10 @@ local function drawBigMapPlayerSelector()
       im.PushStyleColor1(im.Col_ButtonHovered, im.GetColorU322(im.ImVec4(0.75, 0.2, 0.2, 1.0)))
       im.PushStyleColor1(im.Col_Text, im.GetColorU322(im.ImVec4(1, 1, 1, 1)))
       if im.Button("Clear###btn_nav_clear", im.ImVec2(65, btnH)) then
-        if core_groundMarkers.clearPathForPlayer then
+        if core_groundMarkers and core_groundMarkers.clearPathForPlayer then
           core_groundMarkers.clearPathForPlayer(currentNavTarget)
+        elseif freeroam_bigMapMode and freeroam_bigMapMode.setNavFocus then
+          freeroam_bigMapMode.setNavFocus(nil)
         end
         if freeroam_bigMapMode and freeroam_bigMapMode.resetRoute then
           freeroam_bigMapMode.resetRoute()
@@ -648,7 +733,7 @@ local function careerToggleBigMap(...)
   -- which is now *this* function, causing infinite recursion. Block it.
   if _bigMapToggling then return end
   _bigMapToggling = true
-  local ok, err = pcall(function()
+  local ok, err = pcall(function(...)
     if isSplitModeActive() or isCareerModeActive() then
       if freeroam_bigMapMode and freeroam_bigMapMode.bigMapActive and freeroam_bigMapMode.bigMapActive() then
         freeroam_bigMapMode.exitBigMap(true, true)
@@ -674,7 +759,7 @@ local function careerToggleBigMap(...)
     if freeroam_bigMapMode and freeroam_bigMapMode.enterBigMap then
       freeroam_bigMapMode.enterBigMap({instant = true, forceOpen = true})
     end
-  end)
+  end, ...)
   _bigMapToggling = false
   if not ok then log("E", "careerSplitScreen", "careerToggleBigMap error: " .. tostring(err)) end
 end
@@ -684,6 +769,7 @@ local function careerEnterBigMap(options, ...)
   if isSplitModeActive() then
     options.instant = true
     options.forceOpen = true
+    ensureGroundMarkersLoaded()
   end
   if origEnterBigMap and origEnterBigMap ~= careerEnterBigMap then
     local res = origEnterBigMap(options, ...)
@@ -810,7 +896,7 @@ local function hookBigMapMode()
             local hitDist = castRayStatic(ray.pos, ray.dir, 50000)
             if hitDist < 50000 then
               local hitPos = ray.pos + ray.dir * hitDist
-              local currentTarget = (core_groundMarkers and core_groundMarkers.getTargetPlayer and core_groundMarkers.getTargetPlayer()) or 0
+              local currentTarget = getRouteTargetPlayer()
               if core_groundMarkers and core_groundMarkers.currentlyHasTarget and core_groundMarkers.currentlyHasTarget(currentTarget) then
                 freeroam_bigMapMode.setNavFocus(nil)
               else
@@ -1082,6 +1168,7 @@ end
 
 local function ensureModExtensionsLoaded()
   hookCoreMultiseat()
+  ensureGroundMarkersLoaded()
 end
 
 local function getConnectedDevicesSummary()
@@ -1421,6 +1508,8 @@ local function startSplitScreen()
 
   hookBigMapMode()
   hookCareerJobsAndLogistics()
+  ensureGroundMarkersLoaded()
+  setRouteTargetPlayer(0)
 
   if gameplay_rawPois and gameplay_rawPois.clear then
     gameplay_rawPois.clear()
@@ -2620,7 +2709,7 @@ local function drawPlayerInteractPrompts()
   end
 end
 
-local function performInteract(targetPlayerIdx)
+performInteract = function(targetPlayerIdx)
   if targetPlayerIdx ~= nil then
     local prompt = playerPrompts[targetPlayerIdx]
     if prompt and prompt.buttonFun then
@@ -3183,6 +3272,8 @@ local function onExtensionLoaded(extName)
   log("I", "careerSplitScreen", "Career Split-Screen extension initialized.")
 end
 
+M.getRouteTargetPlayer = function() return getRouteTargetPlayer() end
+M.setRouteTargetPlayer = function(pIdx) return setRouteTargetPlayer(pIdx) end
 M.toggleRouteTarget = toggleRouteTarget
 M.drawBigMapPlayerSelector = drawBigMapPlayerSelector
 M.ensureSinglePlayerInputState = ensureSinglePlayerInputState

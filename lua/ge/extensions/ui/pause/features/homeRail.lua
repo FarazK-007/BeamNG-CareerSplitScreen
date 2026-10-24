@@ -1297,12 +1297,17 @@ end
 local function buildMultiseatActions(context, registerButton)
   if context.isFirstDriveActive then return {} end
 
-  local isSplitRunning = (careerSplitScreen and careerSplitScreen.isActive and careerSplitScreen.isActive()) or (context and context.isMultiseatActive)
-
   local isCareer = (career_career and career_career.isActive and career_career.isActive())
     or (overhaul_career_career and overhaul_career_career.isActive and overhaul_career_career.isActive())
     or (core_gamestate and core_gamestate.state and (core_gamestate.state.state == "career" or core_gamestate.state.state == "overhaul"))
     or (context.mode == "career" or context.mode == "overhaul")
+
+  local isSplitRunning
+  if isCareer then
+    isSplitRunning = bool(careerSplitScreen and careerSplitScreen.isActive and careerSplitScreen.isActive())
+  else
+    isSplitRunning = bool((careerSplitScreen and careerSplitScreen.isActive and careerSplitScreen.isActive()) or (context and context.isMultiseatActive))
+  end
 
   if (context.mode == "freeroam" or context.mode == "career" or context.mode == "overhaul") and not isSplitRunning then
     local actions = {}

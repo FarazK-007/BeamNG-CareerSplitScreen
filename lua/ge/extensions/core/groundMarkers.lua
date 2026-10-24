@@ -64,10 +64,10 @@ local function getTargetVeh(playerIndex)
       local p2 = careerSplitScreen.getP2Vehicle()
       if p2 then return p2 end
     end
-    if careerSplitScreen and careerSplitScreen.getP2VehicleId and be then
+    if careerSplitScreen and careerSplitScreen.getP2VehicleId then
       local id = careerSplitScreen.getP2VehicleId()
       if id then
-        local veh = be:getObjectByID(id)
+        local veh = (be and be.getObjectByID and be:getObjectByID(id)) or (getObjectByID and getObjectByID(id)) or (scenetree and scenetree.findObjectById and scenetree.findObjectById(id))
         if veh then return veh end
       end
     end
