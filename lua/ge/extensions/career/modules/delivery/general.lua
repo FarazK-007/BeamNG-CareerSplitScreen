@@ -340,6 +340,7 @@ local function getNearbyVehicleCargoContainers(callback)
 
 end
 M.getNearbyVehicleCargoContainers = getNearbyVehicleCargoContainers
+M._careerSplitNative = true -- tells careerSplitScreen.lua this file already handles Player 2 (do not wrap it again)
 M.getMostRecentCargoContainerData = function() return mostRecentCargoContainerData end
 
 
@@ -356,7 +357,7 @@ local function defaultDelayCallback(data)
       step.makeStepReturnTrueFunction(function()
         for vehId, data in pairs(data) do
           local veh = scenetree.findObjectById(vehId)
-          core_vehicleBridge.executeAction(veh, 'setFreeze', false)
+          if veh then core_vehicleBridge.executeAction(veh, 'setFreeze', false) end
         end
         gameplay_markerInteraction.setForceReevaluateOpenPrompt()
       return true
@@ -370,7 +371,7 @@ local function defaultDelayCallback(data)
     -- 1s delay, no freeze
     for vehId, data in pairs(data) do
       local veh = scenetree.findObjectById(vehId)
-      core_vehicleBridge.executeAction(veh, 'setFreeze', false)
+      if veh then core_vehicleBridge.executeAction(veh, 'setFreeze', false) end
     end
     gameplay_markerInteraction.setForceReevaluateOpenPrompt()
   end
@@ -410,6 +411,8 @@ local function updateContainerWeights(delayCallback)
     end
   end
   for _, cargo in ipairs(dParcelManager.getAllCargoInVehicles()) do
+    -- cargo can sit in a vehicle that is not a player/owned vehicle right now (e.g. Player 2 switched car): don't crash
+    updatePerVehicle[cargo.location.vehId] = updatePerVehicle[cargo.location.vehId] or {}
     updatePerVehicle[cargo.location.vehId][cargo.location.containerId] = updatePerVehicle[cargo.location.vehId][cargo.location.containerId] or {
       volume = 0,
       density = 1,
@@ -434,8 +437,10 @@ local function updateContainerWeights(delayCallback)
   for vehId, data in pairs(updatePerVehicle) do
     local veh = scenetree.findObjectById(vehId)
 
-    core_vehicleBridge.executeAction(veh, "setCargoContainers", updatePerVehicle[vehId] or {}, "updateDelivery")
-    core_vehicleBridge.executeAction(veh, 'setFreeze', true)
+    if veh then
+      core_vehicleBridge.executeAction(veh, "setCargoContainers", updatePerVehicle[vehId] or {}, "updateDelivery")
+      core_vehicleBridge.executeAction(veh, 'setFreeze', true)
+    end
 
     for _, con in pairs(updatePerVehicle[vehId]) do
       log("I","",string.format("Container %d => volume %0.1f | density: %0.1f",con.containerId, con.volume or 0, con.density or 1))
@@ -760,7 +765,7 @@ local function onActivityAcceptGatherData(elemData, activityData)
         dryBulk = 0
       }
 
-      -- In split-screen co-op, team cargo is shared for delivery drop-off:
+            -- In split-screen co-op, team cargo is shared for delivery drop-off:
       -- If ANY player vehicle is at the stall, ANY cargo destined for this stall across ALL player vehicles can be delivered!
       local isSplit = (careerSplitScreen and careerSplitScreen.isSplitModeActive and careerSplitScreen.isSplitModeActive())
         or (core_multiseat and core_multiseat.isMultiseatActive and core_multiseat.isMultiseatActive())
@@ -804,27 +809,27 @@ local function onActivityAcceptGatherData(elemData, activityData)
       -- Split-screen safety: fallback check directly in dParcelManager if mostRecentCargoContainerData was not refreshed yet
       if dropOffableCargoByCargoType.parcel == 0 and dParcelManager and dParcelManager.getAllCargoInVehicles then
         for _, cargo in ipairs(dParcelManager.getAllCargoInVehicles()) do
-          local matches = false
-          if cargo.destination and cargo.destination.type == "facilityParkingspot" and cargo.destination.psPath == elem.psPath then
-            matches = true
-          elseif cargo.destination and cargo.destination.type == "multi" and cargo.destination.destinations then
-            for _, dest in ipairs(cargo.destination.destinations) do
-              if dest.psPath == elem.psPath then matches = true; break end
-            end
-          end
-          if matches then
-            local near = false
-            if isSplit and playerAtStall then
-              near = true
-            elseif cargo.location and cargo.location.type == "vehicle" and cargo.location.vehId then
-              local cv = scenetree.findObjectById(cargo.location.vehId)
-              if cv and (cv:getPosition() - psPos):squaredLength() < 25 * 25 then
-                near = true
+              local matches = false
+              if cargo.destination and cargo.destination.type == "facilityParkingspot" and cargo.destination.psPath == elem.psPath then
+                matches = true
+              elseif cargo.destination and cargo.destination.type == "multi" and cargo.destination.destinations then
+                for _, dest in ipairs(cargo.destination.destinations) do
+                  if dest.psPath == elem.psPath then matches = true; break end
+                end
               end
-            end
-            if near then
-              local t = cargo.type or "parcel"
-              dropOffableCargoByCargoType[t] = (dropOffableCargoByCargoType[t] or 0) + (cargo.slots or 1)
+              if matches then
+                local near = false
+                if isSplit and playerAtStall then
+                  near = true
+                elseif cargo.location and cargo.location.type == "vehicle" and cargo.location.vehId then
+                  local cv = scenetree.findObjectById(cargo.location.vehId)
+                  if cv and (cv:getPosition() - psPos):squaredLength() < 25 * 25 then
+                    near = true
+                  end
+                end
+                if near then
+                local t = cargo.type or "parcel"
+                dropOffableCargoByCargoType[t] = (dropOffableCargoByCargoType[t] or 0) + (cargo.slots or 1)
             end
           end
         end

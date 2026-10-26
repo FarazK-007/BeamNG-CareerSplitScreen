@@ -381,7 +381,7 @@ M.confirmDropOffData = function(confirmedDropOffs, facId, psPath)
           step.makeStepReturnTrueFunction(function()
             for vehId, data in pairs(data) do
               local veh = scenetree.findObjectById(vehId)
-              core_vehicleBridge.executeAction(veh, 'setFreeze', false)
+              if veh then core_vehicleBridge.executeAction(veh, 'setFreeze', false) end
             end
           return true
           end
@@ -394,7 +394,7 @@ M.confirmDropOffData = function(confirmedDropOffs, facId, psPath)
       -- 1s delay, no freeze
       for vehId, data in pairs(data) do
         local veh = scenetree.findObjectById(vehId)
-        core_vehicleBridge.executeAction(veh, 'setFreeze', false)
+        if veh then core_vehicleBridge.executeAction(veh, 'setFreeze', false) end
       end
     end
     M.confirmDropOffCheckComplete()

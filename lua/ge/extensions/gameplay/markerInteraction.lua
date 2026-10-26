@@ -650,6 +650,13 @@ end
 
 local function evaluatePlayerInteractions(dtSim, clusterQt)
   if not clusterQt then return end
+  -- careerSplitScreen.lua already evaluates AND draws the per-player prompts (throttled to ~7x/s).
+  -- This copy ran every frame for both players, firing onActivityAcceptGatherData each time, and its result
+  -- was never shown (its draw function above bails out when careerSplitScreen is present). Pure overhead.
+  if careerSplitScreen and careerSplitScreen.drawPlayerInteractPrompts then
+    if next(playerPrompts) then table.clear(playerPrompts) end
+    return
+  end
   local isSplit = (careerSplitScreen and careerSplitScreen.isActive and careerSplitScreen.isActive())
     or (core_multiseat and core_multiseat.isMultiseatActive and core_multiseat.isMultiseatActive())
   if not isSplit then
@@ -714,6 +721,9 @@ local function evaluatePlayerInteractions(dtSim, clusterQt)
 end
 
 local function performInteract(targetPlayerIdx)
+  if careerSplitScreen and careerSplitScreen.performInteract then
+    return careerSplitScreen.performInteract(targetPlayerIdx)
+  end
   if targetPlayerIdx ~= nil then
     local prompt = playerPrompts[targetPlayerIdx]
     if prompt and prompt.buttonFun then
