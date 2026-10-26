@@ -44,25 +44,35 @@ local function inverseLerp(min, max, value)
 end
 
 
-local atParkingSpeed, atParkingSpeedPrev
+local atParkingSpeedByPlayer = {}
+local atParkingSpeedPrevByPlayer = {}
 local parkingSpeedMin, parkingSpeedMax = 1/3.6, 3/3.6
-local function getParkingSpeedFactor(playerVelocity)
+local function getParkingSpeedFactor(playerVelocity, pIdx)
+  pIdx = pIdx or 0
+  local atParkingSpeed = atParkingSpeedByPlayer[pIdx]
+  local atParkingSpeedPrev = atParkingSpeedPrevByPlayer[pIdx]
   if playerVelocity < parkingSpeedMin then atParkingSpeed =  true end
   if playerVelocity > parkingSpeedMax then atParkingSpeed = false end
   if atParkingSpeed == nil    then atParkingSpeed = playerVelocity < parkingSpeedMin end
   local atParkingSpeedChanged = atParkingSpeed ~= atParkingSpeedPrev
-  atParkingSpeedPrev = atParkingSpeed
+  atParkingSpeedPrevByPlayer[pIdx] = atParkingSpeed
+  atParkingSpeedByPlayer[pIdx] = atParkingSpeed
   return clamp(inverseLerp(parkingSpeedMin*1.25, parkingSpeedMin*0.75, playerVelocity),0,1), atParkingSpeed, atParkingSpeedChanged
 end
 
-local atCruisingSpeed, atCruisingSpeedPrev
+local atCruisingSpeedByPlayer = {}
+local atCruisingSpeedPrevByPlayer = {}
 local CruisingSpeedMin, CruisingSpeedMax = 20/3.6, 30/3.6
-local function getCruisingSpeedFactor(playerVelocity)
+local function getCruisingSpeedFactor(playerVelocity, pIdx)
+  pIdx = pIdx or 0
+  local atCruisingSpeed = atCruisingSpeedByPlayer[pIdx]
+  local atCruisingSpeedPrev = atCruisingSpeedPrevByPlayer[pIdx]
   if playerVelocity < CruisingSpeedMin then atCruisingSpeed =  false end
   if playerVelocity > CruisingSpeedMax then atCruisingSpeed = true end
   if atCruisingSpeed == nil    then atCruisingSpeed = playerVelocity > CruisingSpeedMin end
   local atCruisingSpeedChanged = atCruisingSpeed ~= atCruisingSpeedPrev
-  atCruisingSpeedPrev = atCruisingSpeed
+  atCruisingSpeedPrevByPlayer[pIdx] = atCruisingSpeed
+  atCruisingSpeedByPlayer[pIdx] = atCruisingSpeed
   return (atCruisingSpeed and 1 or 0), atCruisingSpeed, atCruisingSpeedChanged
 end
 
@@ -311,9 +321,11 @@ local function populateUpdateData(targetData, v, pIdx, dtReal, dtSim, gAlpha, bb
   if ctxId and core_camera.getPositionXYZ(ctxId) then
     targetData.camPos:set(core_camera.getPositionXYZ(ctxId))
     targetData.camRot:set(core_camera.getQuatXYZW(ctxId))
+    targetData.camContext = ctxId
   else
     targetData.camPos:set(core_camera.getPositionXYZ())
     targetData.camRot:set(core_camera.getQuatXYZW())
+    targetData.camContext = nil
   end
 
   targetData.playerPosition = v and targetData.vehPos or targetData.camPos or vec3()
@@ -334,8 +346,8 @@ local function populateUpdateData(targetData, v, pIdx, dtReal, dtSim, gAlpha, bb
     targetData.isWalking = false
   end
 
-  local parkingSpeedFactor, isAtParkingSpeed, parkingSpeedChanged = getParkingSpeedFactor(playerVelocity)
-  local cruisingSpeedFactor, isAtcruisingSpeed, cruisingSpeedChanged = getCruisingSpeedFactor(playerVelocity)
+  local parkingSpeedFactor, isAtParkingSpeed, parkingSpeedChanged = getParkingSpeedFactor(playerVelocity, pIdx)
+  local cruisingSpeedFactor, isAtcruisingSpeed, cruisingSpeedChanged = getCruisingSpeedFactor(playerVelocity, pIdx)
 
   targetData.parkingSpeedFactor = parkingSpeedFactor
   targetData.cruisingSpeedFactor = cruisingSpeedFactor
@@ -754,6 +766,85 @@ local function performInteract(targetPlayerIdx)
   return false
 end
 
+local splitSkiaIcons = {}
+local function clearSplitSkiaIcons()
+  if next(splitSkiaIcons) then
+    for id, icon in pairs(splitSkiaIcons) do
+      if icon and icon.release then
+        pcall(function() icon:release() end)
+      end
+    end
+    table.clear(splitSkiaIcons)
+  end
+end
+
+local function updateSplitSkiaIcon(marker, cluster, currentData, isSplit, dtReal)
+  if not isSplit then
+    clearSplitSkiaIcons()
+    return
+  end
+
+  if not render_skiaIcons and extensions.load then
+    pcall(function() extensions.load("render_skiaIcons") end)
+  end
+  if not render_skiaIcons or not render_skiaIcons.getIcon then return end
+
+  local mPos = marker.pos or (cluster and cluster.pos)
+  if not mPos then return end
+
+  local pPos = currentData.playerPosition or (currentData.veh and currentData.veh:getPosition())
+  local dist = pPos and mPos:distance(pPos) or 999
+  local markerId = (cluster and cluster.id) or (marker.outlineId and tostring(marker.outlineId)) or tostring(mPos)
+
+  local icon = splitSkiaIcons[markerId]
+  if dist < 90 then
+    if not icon then
+      local motive = "cardboardBox"
+      local col = "orange"
+      if cluster and cluster.icon then
+        if string.find(cluster.icon, "dropoff") then
+          motive = "boxDropOff01"
+          col = "blue"
+        elseif string.find(cluster.icon, "pickup") then
+          motive = "boxPickUp01"
+          col = "orange"
+        elseif string.find(cluster.icon, "parking") then
+          motive = "parkingIndicator"
+          col = "blue"
+        end
+      end
+      local ok, res = pcall(function()
+        return render_skiaIcons.getIcon({
+          shape = "circle",
+          motive = motive,
+          color = col,
+        })
+      end)
+      if ok and res then
+        icon = res
+        splitSkiaIcons[markerId] = icon
+      end
+    end
+    if icon then
+      local iconZ = mPos.z + 2.5
+      if currentData.highestBBPointZ and dist < 12 then
+        iconZ = math.max(iconZ, currentData.highestBBPointZ + 0.35)
+      end
+      local iconPos = vec3(mPos.x, mPos.y, iconZ)
+      icon:setVisible(true)
+      icon:update(iconPos, 1.0, dtReal)
+    end
+  else
+    if icon then
+      pcall(function()
+        icon:setVisible(false, true)
+        icon:release()
+      end)
+      splitSkiaIcons[markerId] = nil
+    end
+  end
+end
+
 local function displayMissionMarkers(level, dtSim, dtReal)
   profilerPushEvent("MissionMarker precalc")
   local multiseatActive = core_multiseat
@@ -786,6 +877,10 @@ local function displayMissionMarkers(level, dtSim, dtReal)
 
   local isSplit = (careerSplitScreen and (careerSplitScreen.isSplitModeActive and careerSplitScreen.isSplitModeActive() or careerSplitScreen.isActive and careerSplitScreen.isActive()))
     or (render_splitScreen and render_splitScreen.isEnabled and render_splitScreen.isEnabled())
+
+  if not isSplit then
+    clearSplitSkiaIcons()
+  end
 
   local p0Veh = getPlayerVehicle(0)
   local p1Veh = nil
@@ -855,13 +950,17 @@ local function displayMissionMarkers(level, dtSim, dtReal)
 
       if showMarker then
         local currentData = updateData0
-        if isSplit and p1Veh and p1Veh ~= p0Veh and updateData1.vehPos and updateData0.vehPos then
+        if isSplit and p1Veh and p1Veh ~= p0Veh then
           local cPos = cluster.pos or (marker and marker.pos)
           if cPos then
-            local d0 = updateData0.vehPos:squaredDistance(cPos)
-            local d1 = updateData1.vehPos:squaredDistance(cPos)
-            if d1 < d0 then
-              currentData = updateData1
+            local p0Pos = updateData0.playerPosition or updateData0.vehPos
+            local p1Pos = updateData1.playerPosition or updateData1.vehPos
+            if p0Pos and p1Pos then
+              local d0 = p0Pos:squaredDistance(cPos)
+              local d1 = p1Pos:squaredDistance(cPos)
+              if d1 < d0 then
+                currentData = updateData1
+              end
             end
           end
         end
@@ -869,14 +968,85 @@ local function displayMissionMarkers(level, dtSim, dtReal)
         marker:show()
         marker:update(currentData)
 
+        -- SPLIT-SCREEN FIX: 3D Outline stall elevation and scaling (only when isSplit is active)
+        if isSplit and marker.outlineId then
+          local outlineObj = scenetree.findObjectById(marker.outlineId)
+          if outlineObj then
+            local mPos = marker.pos or (cluster and cluster.pos)
+            if mPos then
+              outlineObj:setPositionXYZ(mPos.x, mPos.y, mPos.z + 0.05)
+              local scl = marker.scl or vec3(3, 6, 1)
+              local pPos = currentData.playerPosition or (currentData.veh and currentData.veh:getPosition())
+              local isNear = pPos and mPos:distance(pPos) < 35
+              if isNear then
+                outlineObj.instanceColor = ColorF(1, 1, 1, 0.75):asLinear4F()
+                outlineObj:updateInstanceRenderData()
+                outlineObj:setScaleXYZ(scl.x / 1, scl.y / 2.05, 0.45)
+              end
+            end
+          end
+        end
+
+        -- SPLIT-SCREEN FIX: Floating icon height clamping (only when isSplit is active)
+        if isSplit and marker.iconInfo then
+          local mPos = marker.pos or (cluster and cluster.pos)
+          if mPos and marker.iconInfo.worldPosition then
+            local groundZ = mPos.z
+            local heightAboveGround = marker.iconInfo.worldPosition.z - groundZ
+            if heightAboveGround > 4.0 or heightAboveGround < 0 then
+              marker.iconInfo.worldPosition = vec3(marker.iconInfo.worldPosition.x, marker.iconInfo.worldPosition.y, groundZ + 2.5)
+            end
+            local pPos = currentData.playerPosition or (currentData.veh and currentData.veh:getPosition())
+            if pPos and mPos:distance(pPos) < 100 then
+              if marker.iconInfo.color and marker.iconInfo.color.alpha < 200 then
+                marker.iconInfo.color = ColorI(255, 255, 255, 255)
+              end
+            end
+          end
+        end
+
+        -- SPLIT-SCREEN FIX: 3D Skia billboard icon for secondary viewports
+        if isSplit then
+          updateSplitSkiaIcon(marker, cluster, currentData, isSplit, dtReal)
+        end
+
+        -- SPLIT-SCREEN FIX: Ground Decal fading override (only when isSplit is active)
         if marker.groundDecalData then
-          if marker.groundDecalData.texture then
-            decalCount = decalCount + 1
-            decals[decalCount] = marker.groundDecalData
-          else
-            for _, decal in ipairs(marker.groundDecalData) do
+          if isSplit then
+            local function adjustDecal(d)
+              if not d._origFadeStart then
+                d._origFadeStart = d.fadeStart or 3.5
+                d._origFadeEnd = d.fadeEnd or 6.0
+              end
+              d.fadeStart = 20000
+              d.fadeEnd = 25000
               decalCount = decalCount + 1
-              decals[decalCount] = decal
+              decals[decalCount] = d
+            end
+            if marker.groundDecalData.texture then
+              adjustDecal(marker.groundDecalData)
+            else
+              for _, decal in ipairs(marker.groundDecalData) do
+                adjustDecal(decal)
+              end
+            end
+          else
+            local function normalDecal(d)
+              if d._origFadeStart then
+                d.fadeStart = d._origFadeStart
+                d.fadeEnd = d._origFadeEnd
+                d._origFadeStart = nil
+                d._origFadeEnd = nil
+              end
+              decalCount = decalCount + 1
+              decals[decalCount] = d
+            end
+            if marker.groundDecalData.texture then
+              normalDecal(marker.groundDecalData)
+            else
+              for _, decal in ipairs(marker.groundDecalData) do
+                normalDecal(decal)
+              end
             end
           end
         end
@@ -906,9 +1076,25 @@ local function displayMissionMarkers(level, dtSim, dtReal)
         end
       else
         marker:hide()
+        if isSplit and cluster and splitSkiaIcons[cluster.id] then
+          local sIcon = splitSkiaIcons[cluster.id]
+          pcall(function()
+            sIcon:setVisible(false, true)
+            sIcon:release()
+          end)
+          splitSkiaIcons[cluster.id] = nil
+        end
       end
     else
       marker:hide()
+      if isSplit and cluster and splitSkiaIcons[cluster.id] then
+        local sIcon = splitSkiaIcons[cluster.id]
+        pcall(function()
+          sIcon:setVisible(false, true)
+          sIcon:release()
+        end)
+        splitSkiaIcons[cluster.id] = nil
+      end
     end
   end
 
@@ -1023,6 +1209,7 @@ end
 
 
 local function clearCache()
+  clearSplitSkiaIcons()
   M.setForceReevaluateOpenPrompt()
 end
 
@@ -1057,6 +1244,7 @@ end
 
 
 local function onClientEndMission(levelPath)
+  clearSplitSkiaIcons()
   M.navigationPoiId = nil
 end
 
