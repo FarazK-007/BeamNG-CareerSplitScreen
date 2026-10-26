@@ -531,6 +531,23 @@ local function hookCareerJobsAndLogistics()
               table.insert(uiData.player.vehicles, 1, vInfo)
               log("I", "careerSplitScreen", "Prioritized vehicle " .. tostring(targetVehId) .. " to index 1 in cargoOverview.")
             end
+
+            -- Automatically set route target player based on the cargo vehicle being viewed
+            if isSplitModeActive() then
+              local p1Veh = getP2Vehicle() or getPlayerVehicle(1)
+              local p1VehId = p1Veh and p1Veh:getID()
+              if p1VehId and targetVehId == p1VehId then
+                setRouteTargetPlayer(1, true)
+                log("I", "careerSplitScreen", "Auto-set route target to Player 2 (cargo screen for P2 vehicle " .. tostring(targetVehId) .. ")")
+              else
+                local p0Veh = getPlayerVehicle(0)
+                local p0VehId = p0Veh and p0Veh:getID()
+                if p0VehId and targetVehId == p0VehId then
+                  setRouteTargetPlayer(0, true)
+                  log("I", "careerSplitScreen", "Auto-set route target to Player 1 (cargo screen for P1 vehicle " .. tostring(targetVehId) .. ")")
+                end
+              end
+            end
           end
         end
       end
@@ -542,6 +559,122 @@ local function hookCareerJobsAndLogistics()
   if not overhaul_career_logistics_general and career_modules_delivery_general and not career_modules_delivery_general._careerSplitContainersHooked then
     wrapDeliveryContainers(career_modules_delivery_general, "career_modules_delivery_general")
   end
+
+  -- Hook cargoScreen enter, setCargoRoute, and setBestRoute for automatic player routing
+  local function hookCargoScreenRouting(cScreenMod, parcelMgrMod, name)
+    if not cScreenMod or cScreenMod._careerSplitRoutingHooked then return end
+    cScreenMod._careerSplitRoutingHooked = true
+
+    -- Hook enterCargoOverviewScreen
+    local origEnter = cScreenMod.enterCargoOverviewScreen
+    if origEnter then
+      cScreenMod.enterCargoOverviewScreen = function(facilityId, parkingSpotPath)
+        if isSplitModeActive() then
+          local targetPIdx = interactingPlayer
+          if targetPIdx == nil and parkingSpotPath then
+            local spot = (overhaul_career_logistics_general and overhaul_career_logistics_general.getParkingSpotByPath and overhaul_career_logistics_general.getParkingSpotByPath(parkingSpotPath))
+              or (career_modules_delivery_general and career_modules_delivery_general.getParkingSpotByPath and career_modules_delivery_general.getParkingSpotByPath(parkingSpotPath))
+            if spot and spot.pos then
+              local p0Veh = getPlayerVehicle(0)
+              local p1Veh = getP2Vehicle() or getPlayerVehicle(1)
+              local d0 = p0Veh and (p0Veh:getPosition() - spot.pos):squaredLength() or math.huge
+              local d1 = p1Veh and (p1Veh:getPosition() - spot.pos):squaredLength() or math.huge
+              if d1 < d0 and d1 < 35 * 35 then
+                targetPIdx = 1
+                lastInteractingVehicleId = p1Veh:getID()
+              elseif d0 < 35 * 35 then
+                targetPIdx = 0
+                lastInteractingVehicleId = p0Veh and p0Veh:getID()
+              end
+            end
+          end
+          if targetPIdx ~= nil then
+            setRouteTargetPlayer(targetPIdx, true)
+          end
+        end
+        return origEnter(facilityId, parkingSpotPath)
+      end
+    end
+
+    -- Hook setCargoRoute (e.g. clicking Set Route on a cargo card)
+    local origSetCargoRoute = cScreenMod.setCargoRoute
+    if origSetCargoRoute then
+      cScreenMod.setCargoRoute = function(cargoId, origin)
+        if isSplitModeActive() and cargoId and parcelMgrMod and parcelMgrMod.getCargoById then
+          local cargo = parcelMgrMod.getCargoById(cargoId)
+          local vId = cargo and ((cargo.location and cargo.location.vehId) or (cargo._transientMove and cargo._transientMove.targetLocation and cargo._transientMove.targetLocation.vehId))
+          local p1Veh = getP2Vehicle() or getPlayerVehicle(1)
+          if vId and p1Veh and vId == p1Veh:getID() then
+            setRouteTargetPlayer(1, true)
+          elseif vId then
+            local p0Veh = getPlayerVehicle(0)
+            if p0Veh and vId == p0Veh:getID() then
+              setRouteTargetPlayer(0, true)
+            end
+          end
+        end
+        return origSetCargoRoute(cargoId, origin)
+      end
+    end
+
+    -- Hook setBestRoute so it routes for the active player's vehicle
+    local origSetBestRoute = cScreenMod.setBestRoute
+    if origSetBestRoute then
+      cScreenMod.setBestRoute = function(onlyClosestTarget)
+        if not isSplitModeActive() then
+          return origSetBestRoute(onlyClosestTarget)
+        end
+
+        local pIdx = core_groundMarkers and core_groundMarkers.targetPlayerIndex or selectedRoutePlayer or 0
+        local targetVeh = (pIdx == 1) and (getP2Vehicle() or getPlayerVehicle(1)) or getPlayerVehicle(0)
+        local targetVehId = targetVeh and targetVeh:getID()
+
+        local origGetAllCargo = parcelMgrMod and parcelMgrMod.getAllCargoInVehicles
+        if origGetAllCargo and targetVehId then
+          parcelMgrMod.getAllCargoInVehicles = function(includeTransient)
+            local list = origGetAllCargo(includeTransient)
+            local filtered = {}
+            for _, c in ipairs(list or {}) do
+              local vId = (c.location and c.location.vehId) or (c._transientMove and c._transientMove.targetLocation and c._transientMove.targetLocation.vehId)
+              if vId == targetVehId then
+                table.insert(filtered, c)
+              end
+            end
+            return filtered
+          end
+        end
+
+        local origGetPlayerVehicle = _G.getPlayerVehicle
+        if targetVeh and origGetPlayerVehicle then
+          _G.getPlayerVehicle = function(idx)
+            if idx == 0 or idx == nil then
+              return targetVeh
+            end
+            return origGetPlayerVehicle(idx)
+          end
+        end
+
+        local ok, res = pcall(origSetBestRoute, onlyClosestTarget)
+
+        if origGetAllCargo then
+          parcelMgrMod.getAllCargoInVehicles = origGetAllCargo
+        end
+        if origGetPlayerVehicle then
+          _G.getPlayerVehicle = origGetPlayerVehicle
+        end
+
+        if not ok then
+          log("E", "careerSplitScreen", "Error in " .. tostring(name) .. " setBestRoute: " .. tostring(res))
+        end
+        return res
+      end
+    end
+
+    log("I", "careerSplitScreen", "Hooked " .. tostring(name) .. " for player-specific cargo routing.")
+  end
+
+  hookCargoScreenRouting(overhaul_career_logistics_cargoScreen, overhaul_career_logistics_parcelManager, "overhaul_career_logistics_cargoScreen")
+  hookCargoScreenRouting(career_modules_delivery_cargoScreen, career_modules_delivery_parcelManager, "career_modules_delivery_cargoScreen")
 end
 
 local selectedRoutePlayer = 0
@@ -611,14 +744,16 @@ getRouteTargetPlayer = function()
   return selectedRoutePlayer or 0
 end
 
-setRouteTargetPlayer = function(pIdx)
+setRouteTargetPlayer = function(pIdx, silent)
   pIdx = tonumber(pIdx) or 0
   selectedRoutePlayer = pIdx
   ensureGroundMarkersLoaded()
   if core_groundMarkers and core_groundMarkers.setTargetPlayer then
     core_groundMarkers.setTargetPlayer(pIdx)
   end
-  Engine.Audio.playOnce('AudioGui', 'event:>UI>Main>select')
+  if not silent and Engine and Engine.Audio then
+    Engine.Audio.playOnce('AudioGui', 'event:>UI>Main>select')
+  end
 end
 
 toggleRouteTarget = function()
@@ -2843,6 +2978,9 @@ performInteract = function(targetPlayerIdx)
         local p1 = getP2Vehicle() or getPlayerVehicle(1)
         lastInteractingVehicleId = p1 and p1:getID()
       end
+      if isSplitModeActive() then
+        setRouteTargetPlayer(targetPlayerIdx, true)
+      end
       local ok, err = pcall(prompt.buttonFun)
       interactingPlayer = nil
       playerPrompts[targetPlayerIdx] = nil
@@ -2864,6 +3002,9 @@ performInteract = function(targetPlayerIdx)
         local p1 = getP2Vehicle() or getPlayerVehicle(1)
         lastInteractingVehicleId = p1 and p1:getID()
       end
+      if isSplitModeActive() then
+        setRouteTargetPlayer(otherIdx, true)
+      end
       local ok, err = pcall(otherPrompt.buttonFun)
       interactingPlayer = nil
       playerPrompts[otherIdx] = nil
@@ -2879,6 +3020,9 @@ performInteract = function(targetPlayerIdx)
     interactingPlayer = 0
     local p0 = getPlayerVehicle(0)
     lastInteractingVehicleId = p0 and p0:getID()
+    if isSplitModeActive() then
+      setRouteTargetPlayer(0, true)
+    end
     local ok, err = pcall(playerPrompts[0].buttonFun)
     interactingPlayer = nil
     playerPrompts[0] = nil
@@ -2887,6 +3031,9 @@ performInteract = function(targetPlayerIdx)
     interactingPlayer = 1
     local p1 = getP2Vehicle() or getPlayerVehicle(1)
     lastInteractingVehicleId = p1 and p1:getID()
+    if isSplitModeActive() then
+      setRouteTargetPlayer(1, true)
+    end
     local ok, err = pcall(playerPrompts[1].buttonFun)
     interactingPlayer = nil
     playerPrompts[1] = nil
