@@ -236,7 +236,8 @@ local function getNearbyVehicleCargoContainers(callback)
   local refNodeClusterIdByVehId = {}
   for vehId, veh in pairs(candidateVehs) do
     local vPos = veh:getPosition()
-    local isNear = (p0Pos and (p0Pos - vPos):squaredLength() < nearbyRadius)
+    local isNear = (candidateVehs[vehId] ~= nil)
+      or (p0Pos and (p0Pos - vPos):squaredLength() < nearbyRadius)
       or (p1Pos and (p1Pos - vPos):squaredLength() < nearbyRadius)
     if isNear then
       vehCargoData[vehId] = -1
@@ -758,7 +759,28 @@ local function onActivityAcceptGatherData(elemData, activityData)
         fluid = 0,
         dryBulk = 0
       }
+
+      -- In split-screen co-op, team cargo is shared for delivery drop-off:
+      -- If ANY player vehicle is at the stall, ANY cargo destined for this stall across ALL player vehicles can be delivered!
+      local isSplit = (careerSplitScreen and careerSplitScreen.isSplitModeActive and careerSplitScreen.isSplitModeActive())
+        or (core_multiseat and core_multiseat.isMultiseatActive and core_multiseat.isMultiseatActive())
+        or (getPlayerVehicle(1) ~= nil and getPlayerVehicle(1) ~= getPlayerVehicle(0))
+
+      local playerAtStall = false
+      if isSplit then
+        local p0Veh = getPlayerVehicle(0)
+        local p1Veh = (careerSplitScreen and careerSplitScreen.getP2Vehicle and careerSplitScreen.getP2Vehicle()) or getPlayerVehicle(1)
+        if (p0Veh and (p0Veh:getPosition() - psPos):squaredLength() < 35 * 35)
+          or (p1Veh and (p1Veh:getPosition() - psPos):squaredLength() < 35 * 35) then
+          playerAtStall = true
+        end
+      end
+
       for _, container in ipairs(mostRecentCargoContainerData) do
+        local nearStall = (container.position - psPos):squaredLength() < 25*25
+        if isSplit and playerAtStall then
+          nearStall = true
+        end
         for _, cargo in ipairs(container.rawCargo) do
           local add = 1
           local type = cargo.type
@@ -770,10 +792,10 @@ local function onActivityAcceptGatherData(elemData, activityData)
             add = cargo.slots
           end
           if cargo.destination.type == "facilityParkingspot" then
-            dropOffableCargoByCargoType[cargo.type]  = dropOffableCargoByCargoType[type] + ((cargo.destination.psPath == elem.psPath and (container.position - psPos):squaredLength() < 25*25) and add or 0)
+            dropOffableCargoByCargoType[cargo.type]  = dropOffableCargoByCargoType[type] + ((cargo.destination.psPath == elem.psPath and nearStall) and add or 0)
           elseif cargo.destination.type == "multi" then
             for _, dest in ipairs(cargo.destination.destinations) do
-              dropOffableCargoByCargoType[type]  = dropOffableCargoByCargoType[type] + ((dest.psPath == elem.psPath and (container.position - psPos):squaredLength() < 25*25) and add or 0)
+              dropOffableCargoByCargoType[type]  = dropOffableCargoByCargoType[type] + ((dest.psPath == elem.psPath and nearStall) and add or 0)
             end
           end
         end
@@ -782,21 +804,27 @@ local function onActivityAcceptGatherData(elemData, activityData)
       -- Split-screen safety: fallback check directly in dParcelManager if mostRecentCargoContainerData was not refreshed yet
       if dropOffableCargoByCargoType.parcel == 0 and dParcelManager and dParcelManager.getAllCargoInVehicles then
         for _, cargo in ipairs(dParcelManager.getAllCargoInVehicles()) do
-          if cargo.location and cargo.location.type == "vehicle" and cargo.location.vehId then
-            local cv = scenetree.findObjectById(cargo.location.vehId)
-            if cv and (cv:getPosition() - psPos):squaredLength() < 25 * 25 then
-              local matches = false
-              if cargo.destination and cargo.destination.type == "facilityParkingspot" and cargo.destination.psPath == elem.psPath then
-                matches = true
-              elseif cargo.destination and cargo.destination.type == "multi" and cargo.destination.destinations then
-                for _, dest in ipairs(cargo.destination.destinations) do
-                  if dest.psPath == elem.psPath then matches = true; break end
-                end
+          local matches = false
+          if cargo.destination and cargo.destination.type == "facilityParkingspot" and cargo.destination.psPath == elem.psPath then
+            matches = true
+          elseif cargo.destination and cargo.destination.type == "multi" and cargo.destination.destinations then
+            for _, dest in ipairs(cargo.destination.destinations) do
+              if dest.psPath == elem.psPath then matches = true; break end
+            end
+          end
+          if matches then
+            local near = false
+            if isSplit and playerAtStall then
+              near = true
+            elseif cargo.location and cargo.location.type == "vehicle" and cargo.location.vehId then
+              local cv = scenetree.findObjectById(cargo.location.vehId)
+              if cv and (cv:getPosition() - psPos):squaredLength() < 25 * 25 then
+                near = true
               end
-              if matches then
-                local t = cargo.type or "parcel"
-                dropOffableCargoByCargoType[t] = (dropOffableCargoByCargoType[t] or 0) + (cargo.slots or 1)
-              end
+            end
+            if near then
+              local t = cargo.type or "parcel"
+              dropOffableCargoByCargoType[t] = (dropOffableCargoByCargoType[t] or 0) + (cargo.slots or 1)
             end
           end
         end
@@ -973,7 +1001,12 @@ local function onActivityAcceptGatherData(elemData, activityData)
         dropOffPoi.buttonLabel = _tr("ui.career.delivery.general.dropOff")
         dropOffPoi.buttonFun = function() extensions.ui_router.navigate('career.cargoDropOff', {facilityId = elem.facId, parkingSpotPath = elem.psPath}) end
         dropOffPoi.icon = "poi_dropoff_round"
-        table.insert(activityData, dropOffPoi)
+        dropOffPoi.sorting = {
+          type = elem.type,
+          order = -100,
+          id = "aaa_deliveryDropOff"
+        }
+        table.insert(activityData, 1, dropOffPoi)
       end
 
       if anyCargoPickUpAble then

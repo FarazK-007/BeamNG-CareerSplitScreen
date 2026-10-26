@@ -613,7 +613,7 @@ local function hookCareerJobsAndLogistics()
     hookParcelManager(overhaul_career_logistics_parcelManager, "overhaul_career_logistics_parcelManager")
   end
 
-  -- Hook onActivityAcceptGatherData to guarantee [E] Drop Off prompt when cargo vehicle is at destination stall
+  -- Hook onActivityAcceptGatherData to guarantee [E] Drop Off prompt when ANY player vehicle holds matching cargo
   local function hookDeliveryActivity(genMod, parcelMgrMod, name)
     if not genMod or genMod._careerSplitActivityHooked then return end
     genMod._careerSplitActivityHooked = true
@@ -636,60 +636,81 @@ local function hookCareerJobsAndLogistics()
               end
             end
 
-            if not hasDropOff and parcelMgrMod and parcelMgrMod.getAllCargoInVehicles then
-              local ps = (genMod.getParkingSpotByPath and genMod.getParkingSpotByPath(elem.psPath))
-                or (career_modules_delivery_generator and career_modules_delivery_generator.getParkingSpotByPath and career_modules_delivery_generator.getParkingSpotByPath(elem.psPath))
-              local psPos = ps and ps.pos
-              if psPos then
-                local allCargo = parcelMgrMod.getAllCargoInVehicles()
-                local matchingCargoCount = 0
-                for _, cargo in ipairs(allCargo or {}) do
-                  local destMatches = false
-                  if cargo.destination then
-                    if cargo.destination.type == "facilityParkingspot" and cargo.destination.psPath == elem.psPath then
-                      destMatches = true
-                    elseif cargo.destination.type == "multi" and cargo.destination.destinations then
-                      for _, d in ipairs(cargo.destination.destinations) do
-                        if d.psPath == elem.psPath then destMatches = true; break end
-                      end
-                    end
-                  end
+            local ps = (genMod.getParkingSpotByPath and genMod.getParkingSpotByPath(elem.psPath))
+              or (career_modules_delivery_generator and career_modules_delivery_generator.getParkingSpotByPath and career_modules_delivery_generator.getParkingSpotByPath(elem.psPath))
+            local psPos = ps and ps.pos
 
-                  if destMatches and cargo.location and cargo.location.vehId then
-                    local cVeh = scenetree.findObjectById(tonumber(cargo.location.vehId))
-                    if cVeh then
-                      local distSq = (cVeh:getPosition() - psPos):squaredLength()
-                      if distSq < 30 * 30 then
-                        matchingCargoCount = matchingCargoCount + 1
-                      end
+            local p0Veh = getPlayerVehicle(0)
+            local p1Veh = getP2Vehicle() or getPlayerVehicle(1)
+            local p0Dist = (p0Veh and psPos) and (p0Veh:getPosition() - psPos):squaredLength() or math.huge
+            local p1Dist = (p1Veh and psPos) and (p1Veh:getPosition() - psPos):squaredLength() or math.huge
+            local playerAtStall = (p0Dist < 40 * 40) or (p1Dist < 40 * 40)
+
+            if hasDropOff then
+              -- Ensure dropOff is sorted at the top (order = -100) so [E] Drop Off is primary over any inspect option
+              for i, act in ipairs(activityData or {}) do
+                if act.buttonLabel == _tr("ui.career.delivery.general.dropOff")
+                  or (act.heading and act.heading == _tr("ui.career.delivery.general.deliveryDropOff")) then
+                  act.sorting = act.sorting or {}
+                  act.sorting.order = -100
+                  act.sorting.id = "aaa_deliveryDropOff"
+                  if i > 1 then
+                    table.remove(activityData, i)
+                    table.insert(activityData, 1, act)
+                  end
+                  break
+                end
+              end
+            elseif playerAtStall and parcelMgrMod and parcelMgrMod.getAllCargoInVehicles then
+              local allCargo = parcelMgrMod.getAllCargoInVehicles()
+              local matchingCargoCount = 0
+              for _, cargo in ipairs(allCargo or {}) do
+                local destMatches = false
+                if cargo.destination then
+                  if cargo.destination.type == "facilityParkingspot" and cargo.destination.psPath == elem.psPath then
+                    destMatches = true
+                  elseif cargo.destination.type == "multi" and cargo.destination.destinations then
+                    for _, d in ipairs(cargo.destination.destinations) do
+                      if d.psPath == elem.psPath then destMatches = true; break end
                     end
                   end
                 end
+                if destMatches then
+                  matchingCargoCount = matchingCargoCount + (cargo.slots or 1)
+                end
+              end
 
-                if matchingCargoCount > 0 then
-                  log("I", "careerSplitScreen", string.format("Detected %d drop-offable parcels near stall %s! Injecting primary drop-off prompt.", matchingCargoCount, tostring(elem.psPath)))
-                  local dropOffPoi = {
-                    icon = "poi_dropoff_round",
-                    heading = _tr("ui.career.delivery.general.deliveryDropOff"),
-                    buttonLabel = _tr("ui.career.delivery.general.dropOff"),
-                    buttonFun = function()
-                      extensions.ui_router.navigate('career.cargoDropOff', {facilityId = elem.facId, parkingSpotPath = elem.psPath})
-                    end,
-                    props = {
-                      {
-                        icon = "checkmark",
-                        keyLabel = matchingCargoCount > 1
-                          and core_locales.contextTranslate("ui.career.delivery.general.parcelsDropoff", {count = matchingCargoCount})
-                          or _tr("ui.career.delivery.general.parcelDropoff")
-                      }
-                    },
-                    sorting = {
-                      type = elem.type,
-                      id = elem.id or "deliveryDropOff"
+              if matchingCargoCount > 0 then
+                log("I", "careerSplitScreen", string.format("Co-op delivery: detected %d drop-offable cargo items for stall %s across team vehicles! Injecting primary [E] Drop Off prompt.", matchingCargoCount, tostring(elem.psPath)))
+                local isOverhaulMod = (name and name:find("overhaul")) ~= nil
+                local dropOffPoi = {
+                  icon = "poi_dropoff_round",
+                  heading = _tr("ui.career.delivery.general.deliveryDropOff"),
+                  buttonLabel = _tr("ui.career.delivery.general.dropOff"),
+                  buttonFun = function()
+                    if isOverhaulMod and overhaul_career_work_employment and overhaul_career_work_employment.shouldOpenEmployeeDropOff and overhaul_career_work_employment.shouldOpenEmployeeDropOff(elem.facId, elem.psPath) then
+                      if overhaul_career_work_employment.tryAutoDropOffAssigned and overhaul_career_work_employment.tryAutoDropOffAssigned(elem.facId, elem.psPath) then
+                        return
+                      end
+                    end
+                    local route = isOverhaulMod and 'overhaul.cargoDropOff' or 'career.cargoDropOff'
+                    extensions.ui_router.navigate(route, {facilityId = elem.facId, parkingSpotPath = elem.psPath})
+                  end,
+                  props = {
+                    {
+                      icon = "checkmark",
+                      keyLabel = matchingCargoCount > 1
+                        and core_locales.contextTranslate("ui.career.delivery.general.parcelsDropoff", {count = matchingCargoCount})
+                        or _tr("ui.career.delivery.general.parcelDropoff")
                     }
+                  },
+                  sorting = {
+                    type = elem.type,
+                    order = -100,
+                    id = "aaa_deliveryDropOff"
                   }
-                  table.insert(activityData, 1, dropOffPoi)
-                end
+                }
+                table.insert(activityData, 1, dropOffPoi)
               end
             end
           end
