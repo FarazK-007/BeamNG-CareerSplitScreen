@@ -410,7 +410,7 @@ local function hookCareerJobsAndLogistics()
               local elem = {
                 vehId = vehId,
                 containerId = container.id,
-                location = {type = "vehicle", vehId = veh:getID(), containerId = container.id},
+                location = {type = "vehicle", vehId = tonumber(veh:getID()), containerId = tonumber(container.id)},
                 vehName = vehName,
                 name = container.name,
                 moveToLabel = vehName .. " " .. container.name,
@@ -552,30 +552,7 @@ local function hookCareerJobsAndLogistics()
               log("I", "careerSplitScreen", "Prioritized vehicle " .. tostring(targetVehId) .. " to index 1 in cargoOverview.")
             end
 
-            -- Prioritize cards' autoLoadLocations and targetLocations for targetVehId so parcels load into this vehicle
-            if uiData.cardsById and type(uiData.cardsById) == "table" then
-              for _, card in pairs(uiData.cardsById) do
-                if type(card) == "table" then
-                  if type(card.autoLoadLocations) == "table" and #card.autoLoadLocations > 1 then
-                    table.sort(card.autoLoadLocations, function(a, b)
-                      local aMatch = (a and a.vehId and tonumber(a.vehId) == targetVehId) and 1 or 0
-                      local bMatch = (b and b.vehId and tonumber(b.vehId) == targetVehId) and 1 or 0
-                      return aMatch > bMatch
-                    end)
-                  end
-                  if type(card.targetLocations) == "table" and #card.targetLocations > 1 then
-                    table.sort(card.targetLocations, function(a, b)
-                      local aVeh = a and ((a.location and a.location.vehId) or (a.containerVehicleInfo and a.containerVehicleInfo.vehId))
-                      local bVeh = b and ((b.location and b.location.vehId) or (b.containerVehicleInfo and b.containerVehicleInfo.vehId))
-                      local aMatch = (aVeh and tonumber(aVeh) == targetVehId) and 1 or 0
-                      local bMatch = (bVeh and tonumber(bVeh) == targetVehId) and 1 or 0
-                      return aMatch > bMatch
-                    end)
-                  end
-                end
-              end
-            end
-
+            -- Target vehicle prioritization and auto route target for co-op players
             -- Automatically set route target player based on the cargo vehicle being viewed
             if isSplitModeActive() then
               local p1Veh = getP2Vehicle() or getPlayerVehicle(1)
@@ -605,6 +582,128 @@ local function hookCareerJobsAndLogistics()
   end
   if overhaul_career_logistics_general and not overhaul_career_logistics_general._careerSplitContainersHooked then
     wrapDeliveryContainers(overhaul_career_logistics_general, "overhaul_career_logistics_general")
+  end
+
+  -- Hook parcelManager sameLocation to prevent string/number type mismatch on vehId
+  local function hookParcelManager(parcelMgrMod, name)
+    if not parcelMgrMod or parcelMgrMod._careerSplitSameLocationHooked then return end
+    parcelMgrMod._careerSplitSameLocationHooked = true
+    local origSame = parcelMgrMod.sameLocation
+    parcelMgrMod.sameLocation = function(a, b)
+      if not a or not b then return false end
+      if a.type ~= b.type then return false end
+      if a.type == "vehicle" then
+        return (tonumber(a.vehId) == tonumber(b.vehId)) and (tonumber(a.containerId) == tonumber(b.containerId))
+      elseif a.type == "facilityParkingspot" then
+        return a.facId == b.facId and a.psPath == b.psPath
+      end
+      if origSame then return origSame(a, b) end
+      for k, v in pairs(a) do
+        if b[k] ~= v then return false end
+      end
+      return true
+    end
+    log("I", "careerSplitScreen", "Hooked " .. tostring(name) .. " sameLocation.")
+  end
+
+  if career_modules_delivery_parcelManager then
+    hookParcelManager(career_modules_delivery_parcelManager, "career_modules_delivery_parcelManager")
+  end
+  if overhaul_career_logistics_parcelManager then
+    hookParcelManager(overhaul_career_logistics_parcelManager, "overhaul_career_logistics_parcelManager")
+  end
+
+  -- Hook onActivityAcceptGatherData to guarantee [E] Drop Off prompt when cargo vehicle is at destination stall
+  local function hookDeliveryActivity(genMod, parcelMgrMod, name)
+    if not genMod or genMod._careerSplitActivityHooked then return end
+    genMod._careerSplitActivityHooked = true
+
+    local origGather = genMod.onActivityAcceptGatherData
+    if origGather then
+      genMod.onActivityAcceptGatherData = function(elemData, activityData)
+        origGather(elemData, activityData)
+
+        if not isSplitModeActive() then return end
+
+        for _, elem in ipairs(elemData or {}) do
+          if elem.type == "logisticsParking" and elem.psPath then
+            local hasDropOff = false
+            for _, act in ipairs(activityData or {}) do
+              if act.buttonLabel == _tr("ui.career.delivery.general.dropOff")
+                or (act.heading and act.heading == _tr("ui.career.delivery.general.deliveryDropOff")) then
+                hasDropOff = true
+                break
+              end
+            end
+
+            if not hasDropOff and parcelMgrMod and parcelMgrMod.getAllCargoInVehicles then
+              local ps = (genMod.getParkingSpotByPath and genMod.getParkingSpotByPath(elem.psPath))
+                or (career_modules_delivery_generator and career_modules_delivery_generator.getParkingSpotByPath and career_modules_delivery_generator.getParkingSpotByPath(elem.psPath))
+              local psPos = ps and ps.pos
+              if psPos then
+                local allCargo = parcelMgrMod.getAllCargoInVehicles()
+                local matchingCargoCount = 0
+                for _, cargo in ipairs(allCargo or {}) do
+                  local destMatches = false
+                  if cargo.destination then
+                    if cargo.destination.type == "facilityParkingspot" and cargo.destination.psPath == elem.psPath then
+                      destMatches = true
+                    elseif cargo.destination.type == "multi" and cargo.destination.destinations then
+                      for _, d in ipairs(cargo.destination.destinations) do
+                        if d.psPath == elem.psPath then destMatches = true; break end
+                      end
+                    end
+                  end
+
+                  if destMatches and cargo.location and cargo.location.vehId then
+                    local cVeh = scenetree.findObjectById(tonumber(cargo.location.vehId))
+                    if cVeh then
+                      local distSq = (cVeh:getPosition() - psPos):squaredLength()
+                      if distSq < 30 * 30 then
+                        matchingCargoCount = matchingCargoCount + 1
+                      end
+                    end
+                  end
+                end
+
+                if matchingCargoCount > 0 then
+                  log("I", "careerSplitScreen", string.format("Detected %d drop-offable parcels near stall %s! Injecting primary drop-off prompt.", matchingCargoCount, tostring(elem.psPath)))
+                  local dropOffPoi = {
+                    icon = "poi_dropoff_round",
+                    heading = _tr("ui.career.delivery.general.deliveryDropOff"),
+                    buttonLabel = _tr("ui.career.delivery.general.dropOff"),
+                    buttonFun = function()
+                      extensions.ui_router.navigate('career.cargoDropOff', {facilityId = elem.facId, parkingSpotPath = elem.psPath})
+                    end,
+                    props = {
+                      {
+                        icon = "checkmark",
+                        keyLabel = matchingCargoCount > 1
+                          and core_locales.contextTranslate("ui.career.delivery.general.parcelsDropoff", {count = matchingCargoCount})
+                          or _tr("ui.career.delivery.general.parcelDropoff")
+                      }
+                    },
+                    sorting = {
+                      type = elem.type,
+                      id = elem.id or "deliveryDropOff"
+                    }
+                  }
+                  table.insert(activityData, 1, dropOffPoi)
+                end
+              end
+            end
+          end
+        end
+      end
+      log("I", "careerSplitScreen", "Hooked " .. tostring(name) .. " onActivityAcceptGatherData for independent drop-off.")
+    end
+  end
+
+  if career_modules_delivery_general and not career_modules_delivery_general._careerSplitActivityHooked then
+    hookDeliveryActivity(career_modules_delivery_general, career_modules_delivery_parcelManager, "career_modules_delivery_general")
+  end
+  if overhaul_career_logistics_general and not overhaul_career_logistics_general._careerSplitActivityHooked then
+    hookDeliveryActivity(overhaul_career_logistics_general, overhaul_career_logistics_parcelManager, "overhaul_career_logistics_general")
   end
 
   -- Hook cargoScreen enter, setCargoRoute, and setBestRoute for automatic player routing
@@ -647,31 +746,90 @@ local function hookCareerJobsAndLogistics()
     local origFormatCargoGroup = cScreenMod.formatCargoGroup
     if origFormatCargoGroup then
       cScreenMod.formatCargoGroup = function(group, playerCargoContainers, showFirstSeen)
-        local ret = origFormatCargoGroup(group, playerCargoContainers, showFirstSeen)
-        if isSplitModeActive() and type(ret) == "table" then
-          local targetVehId = lastInteractingVehicleId
-          if not targetVehId then
-            local pIdx = interactingPlayer or (core_groundMarkers and core_groundMarkers.targetPlayerIndex) or selectedRoutePlayer or 0
-            local targetVeh = (pIdx == 1) and (getP2Vehicle() or getPlayerVehicle(1)) or getPlayerVehicle(0)
-            targetVehId = targetVeh and targetVeh:getID()
+        local targetVehId = lastInteractingVehicleId
+        if not targetVehId and isSplitModeActive() then
+          local pIdx = interactingPlayer or (core_groundMarkers and core_groundMarkers.targetPlayerIndex) or selectedRoutePlayer or 0
+          local targetVeh = (pIdx == 1) and (getP2Vehicle() or getPlayerVehicle(1)) or getPlayerVehicle(0)
+          targetVehId = targetVeh and targetVeh:getID()
+        end
+
+        local containersToUse = playerCargoContainers
+        if isSplitModeActive() and targetVehId and type(playerCargoContainers) == "table" and #playerCargoContainers > 1 then
+          containersToUse = {}
+          for _, c in ipairs(playerCargoContainers) do
+            table.insert(containersToUse, c)
           end
-          if targetVehId then
-            if type(ret.autoLoadLocations) == "table" and #ret.autoLoadLocations > 1 then
-              table.sort(ret.autoLoadLocations, function(a, b)
-                local aMatch = (a and a.vehId and tonumber(a.vehId) == targetVehId) and 1 or 0
-                local bMatch = (b and b.vehId and tonumber(b.vehId) == targetVehId) and 1 or 0
-                return aMatch > bMatch
-              end)
+          table.sort(containersToUse, function(a, b)
+            local aMatch = (a and a.vehId and tonumber(a.vehId) == targetVehId) and 1 or 0
+            local bMatch = (b and b.vehId and tonumber(b.vehId) == targetVehId) and 1 or 0
+            if aMatch ~= bMatch then return aMatch > bMatch end
+            if a.vehId == b.vehId then return a.containerId < b.containerId end
+            return a.vehId < b.vehId
+          end)
+        end
+
+        local ret = origFormatCargoGroup(group, containersToUse, showFirstSeen)
+
+        if isSplitModeActive() and targetVehId and type(ret) == "table" and type(ret.ids) == "table" then
+          -- Re-sort ret.targetLocations so target vehicle's containers appear first in dropdown
+          if type(ret.targetLocations) == "table" and #ret.targetLocations > 1 then
+            table.sort(ret.targetLocations, function(a, b)
+              local aVeh = a and ((a.location and a.location.vehId) or (a.containerVehicleInfo and a.containerVehicleInfo.vehId))
+              local bVeh = b and ((b.location and b.location.vehId) or (b.containerVehicleInfo and b.containerVehicleInfo.vehId))
+              local aMatch = (aVeh and tonumber(aVeh) == targetVehId) and 1 or 0
+              local bMatch = (bVeh and tonumber(bVeh) == targetVehId) and 1 or 0
+              if aMatch ~= bMatch then return aMatch > bMatch end
+              if a and b and a.maxAmount and b.maxAmount and a.maxAmount ~= b.maxAmount then
+                return a.maxAmount > b.maxAmount
+              end
+              return false
+            end)
+          end
+
+          -- Rebuild ret.autoLoadLocations strictly prioritizing targetVehId's containers
+          local targetContainers = {}
+          local otherContainers = {}
+          for _, loc in ipairs(ret.targetLocations or {}) do
+            if loc.enabled and (loc.maxAmount or 0) > 0 then
+              local vId = loc.containerVehicleInfo and loc.containerVehicleInfo.vehId or (loc.location and loc.location.vehId)
+              if vId and tonumber(vId) == targetVehId then
+                table.insert(targetContainers, loc)
+              else
+                table.insert(otherContainers, loc)
+              end
             end
-            if type(ret.targetLocations) == "table" and #ret.targetLocations > 1 then
-              table.sort(ret.targetLocations, function(a, b)
-                local aVeh = a and ((a.location and a.location.vehId) or (a.containerVehicleInfo and a.containerVehicleInfo.vehId))
-                local bVeh = b and ((b.location and b.location.vehId) or (b.containerVehicleInfo and b.containerVehicleInfo.vehId))
-                local aMatch = (aVeh and tonumber(aVeh) == targetVehId) and 1 or 0
-                local bMatch = (bVeh and tonumber(bVeh) == targetVehId) and 1 or 0
-                return aMatch > bMatch
-              end)
+          end
+
+          local newAutoLoad = {}
+          local remainingNeeded = #ret.ids
+          for _, loc in ipairs(targetContainers) do
+            for i = 1, (loc.maxAmount or 0) do
+              if remainingNeeded > 0 and loc.location then
+                table.insert(newAutoLoad, {
+                  type = "vehicle",
+                  vehId = tonumber(loc.location.vehId),
+                  containerId = tonumber(loc.location.containerId)
+                })
+                remainingNeeded = remainingNeeded - 1
+              end
             end
+          end
+          if remainingNeeded > 0 then
+            for _, loc in ipairs(otherContainers) do
+              for i = 1, (loc.maxAmount or 0) do
+                if remainingNeeded > 0 and loc.location then
+                  table.insert(newAutoLoad, {
+                    type = "vehicle",
+                    vehId = tonumber(loc.location.vehId),
+                    containerId = tonumber(loc.location.containerId)
+                  })
+                  remainingNeeded = remainingNeeded - 1
+                end
+              end
+            end
+          end
+          if #newAutoLoad > 0 then
+            ret.autoLoadLocations = newAutoLoad
           end
         end
         return ret
@@ -684,15 +842,6 @@ local function hookCareerJobsAndLogistics()
         lastInteractingVehicleId = nil
         interactingPlayer = nil
         return origExit(...)
-      end
-    end
-
-    local origLeave = cScreenMod.onCargoOverviewRouteLeave
-    if origLeave then
-      cScreenMod.onCargoOverviewRouteLeave = function(...)
-        lastInteractingVehicleId = nil
-        interactingPlayer = nil
-        return origLeave(...)
       end
     end
 
@@ -3602,9 +3751,11 @@ local function onPreRender(dt)
       end
     end
   end
-  if (overhaul_vehicles_playerVehicles and not overhaul_vehicles_playerVehicles._careerSplitHooked)
-    or (career_modules_delivery_general and not career_modules_delivery_general._careerSplitContainersHooked)
-    or (overhaul_career_logistics_general and not overhaul_career_logistics_general._careerSplitContainersHooked) then
+    if (overhaul_vehicles_playerVehicles and not overhaul_vehicles_playerVehicles._careerSplitHooked)
+    or (career_modules_delivery_general and (not career_modules_delivery_general._careerSplitContainersHooked or not career_modules_delivery_general._careerSplitActivityHooked))
+    or (overhaul_career_logistics_general and (not overhaul_career_logistics_general._careerSplitContainersHooked or not overhaul_career_logistics_general._careerSplitActivityHooked))
+    or (career_modules_delivery_parcelManager and not career_modules_delivery_parcelManager._careerSplitSameLocationHooked)
+    or (overhaul_career_logistics_parcelManager and not overhaul_career_logistics_parcelManager._careerSplitSameLocationHooked) then
     hookCareerJobsAndLogistics()
   end
 
