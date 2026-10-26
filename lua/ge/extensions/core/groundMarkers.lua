@@ -672,7 +672,7 @@ local function getEndWPForPlayer(playerIndex)
   return endWPByPlayer[playerIndex]
 end
 
-local function clearPathForPlayer(playerIndex)
+clearPathForPlayer = function(playerIndex)
   playerIndex = playerIndex or 0
   setPath(nil, {playerIndex = playerIndex})
 end
