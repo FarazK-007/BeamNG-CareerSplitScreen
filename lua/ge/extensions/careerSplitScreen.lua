@@ -357,15 +357,26 @@ local function hookCareerJobsAndLogistics()
           candidateVehs[p1Veh:getID()] = p1Veh
         end
 
-        local nearbyRadius = 25 * 25
+        local nearbyRadius = 40 * 40
         local vehs = {}
         local refNodeClusterIdByVehId = {}
         local vehCargoData = {}
-        for vehId, veh in pairs(candidateVehs) do
-          local vPos = veh:getPosition()
-          local isNear = (p0Pos and (p0Pos - vPos):squaredLength() < nearbyRadius)
-            or (p1Pos and (p1Pos - vPos):squaredLength() < nearbyRadius)
-          if isNear then
+        if activeVehiclesIterator then
+          for vehId, veh in activeVehiclesIterator() do
+            if veh:getJBeamFilename() ~= "unicycle" and veh.playerUsable ~= false then
+              local vPos = veh:getPosition()
+              local isNear = (candidateVehs[vehId] ~= nil)
+                or (p0Pos and (p0Pos - vPos):squaredLength() < nearbyRadius)
+                or (p1Pos and (p1Pos - vPos):squaredLength() < nearbyRadius)
+              if isNear then
+                vehCargoData[vehId] = -1
+                vehs[vehId] = veh
+                refNodeClusterIdByVehId[vehId] = veh:getNodeClusterId(veh:getRefNodeId())
+              end
+            end
+          end
+        else
+          for vehId, veh in pairs(candidateVehs) do
             vehCargoData[vehId] = -1
             vehs[vehId] = veh
             refNodeClusterIdByVehId[vehId] = veh:getNodeClusterId(veh:getRefNodeId())
@@ -375,7 +386,9 @@ local function hookCareerJobsAndLogistics()
           if callback then callback({}) end
           return
         end
-        local dParcelManager = career_modules_delivery_parcelManager
+        local isOverhaulMod = (name and name:find("overhaul")) ~= nil
+        local dParcelManager = (isOverhaulMod and overhaul_career_logistics_parcelManager) or career_modules_delivery_parcelManager
+        local actionName = isOverhaulMod and "overhaulGetCargoContainers" or "getCargoContainers"
         for vehId, veh in pairs(vehs) do
           core_vehicleBridge.requestValue(veh, function(vehCargoContainerData)
             vehCargoData[vehId] = {}
@@ -448,10 +461,17 @@ local function hookCareerJobsAndLogistics()
               if a.vehId == b.vehId then return a.containerId < b.containerId else return a.vehId < b.vehId end
             end)
             if genMod.getMostRecentCargoContainerData then
-              pcall(debug.setupvalue, genMod.getMostRecentCargoContainerData, 1, ret)
+              local okUv, _, uvVal = pcall(debug.getupvalue, genMod.getMostRecentCargoContainerData, 1)
+              if okUv and uvVal then
+                if type(uvVal) == "table" and uvVal.mostRecentCargoContainerData ~= nil then
+                  uvVal.mostRecentCargoContainerData = ret
+                else
+                  pcall(debug.setupvalue, genMod.getMostRecentCargoContainerData, 1, ret)
+                end
+              end
             end
             if callback then callback(ret) end
-          end, "getCargoContainers")
+          end, actionName)
         end
       end
       log("I", "careerSplitScreen", "Hooked " .. tostring(name) .. " cargo containers for Player 2.")
@@ -532,6 +552,30 @@ local function hookCareerJobsAndLogistics()
               log("I", "careerSplitScreen", "Prioritized vehicle " .. tostring(targetVehId) .. " to index 1 in cargoOverview.")
             end
 
+            -- Prioritize cards' autoLoadLocations and targetLocations for targetVehId so parcels load into this vehicle
+            if uiData.cardsById and type(uiData.cardsById) == "table" then
+              for _, card in pairs(uiData.cardsById) do
+                if type(card) == "table" then
+                  if type(card.autoLoadLocations) == "table" and #card.autoLoadLocations > 1 then
+                    table.sort(card.autoLoadLocations, function(a, b)
+                      local aMatch = (a and a.vehId and tonumber(a.vehId) == targetVehId) and 1 or 0
+                      local bMatch = (b and b.vehId and tonumber(b.vehId) == targetVehId) and 1 or 0
+                      return aMatch > bMatch
+                    end)
+                  end
+                  if type(card.targetLocations) == "table" and #card.targetLocations > 1 then
+                    table.sort(card.targetLocations, function(a, b)
+                      local aVeh = a and ((a.location and a.location.vehId) or (a.containerVehicleInfo and a.containerVehicleInfo.vehId))
+                      local bVeh = b and ((b.location and b.location.vehId) or (b.containerVehicleInfo and b.containerVehicleInfo.vehId))
+                      local aMatch = (aVeh and tonumber(aVeh) == targetVehId) and 1 or 0
+                      local bMatch = (bVeh and tonumber(bVeh) == targetVehId) and 1 or 0
+                      return aMatch > bMatch
+                    end)
+                  end
+                end
+              end
+            end
+
             -- Automatically set route target player based on the cargo vehicle being viewed
             if isSplitModeActive() then
               local p1Veh = getP2Vehicle() or getPlayerVehicle(1)
@@ -556,8 +600,11 @@ local function hookCareerJobsAndLogistics()
     log("I", "careerSplitScreen", "Hooked guihooks.trigger for cargo overview vehicle selection.")
   end
 
-  if not overhaul_career_logistics_general and career_modules_delivery_general and not career_modules_delivery_general._careerSplitContainersHooked then
+  if career_modules_delivery_general and not career_modules_delivery_general._careerSplitContainersHooked then
     wrapDeliveryContainers(career_modules_delivery_general, "career_modules_delivery_general")
+  end
+  if overhaul_career_logistics_general and not overhaul_career_logistics_general._careerSplitContainersHooked then
+    wrapDeliveryContainers(overhaul_career_logistics_general, "overhaul_career_logistics_general")
   end
 
   -- Hook cargoScreen enter, setCargoRoute, and setBestRoute for automatic player routing
@@ -593,6 +640,59 @@ local function hookCareerJobsAndLogistics()
           end
         end
         return origEnter(facilityId, parkingSpotPath)
+      end
+    end
+
+    -- Hook formatCargoGroup so autoLoadLocations prioritize interacting player's vehicle
+    local origFormatCargoGroup = cScreenMod.formatCargoGroup
+    if origFormatCargoGroup then
+      cScreenMod.formatCargoGroup = function(group, playerCargoContainers, showFirstSeen)
+        local ret = origFormatCargoGroup(group, playerCargoContainers, showFirstSeen)
+        if isSplitModeActive() and type(ret) == "table" then
+          local targetVehId = lastInteractingVehicleId
+          if not targetVehId then
+            local pIdx = interactingPlayer or (core_groundMarkers and core_groundMarkers.targetPlayerIndex) or selectedRoutePlayer or 0
+            local targetVeh = (pIdx == 1) and (getP2Vehicle() or getPlayerVehicle(1)) or getPlayerVehicle(0)
+            targetVehId = targetVeh and targetVeh:getID()
+          end
+          if targetVehId then
+            if type(ret.autoLoadLocations) == "table" and #ret.autoLoadLocations > 1 then
+              table.sort(ret.autoLoadLocations, function(a, b)
+                local aMatch = (a and a.vehId and tonumber(a.vehId) == targetVehId) and 1 or 0
+                local bMatch = (b and b.vehId and tonumber(b.vehId) == targetVehId) and 1 or 0
+                return aMatch > bMatch
+              end)
+            end
+            if type(ret.targetLocations) == "table" and #ret.targetLocations > 1 then
+              table.sort(ret.targetLocations, function(a, b)
+                local aVeh = a and ((a.location and a.location.vehId) or (a.containerVehicleInfo and a.containerVehicleInfo.vehId))
+                local bVeh = b and ((b.location and b.location.vehId) or (b.containerVehicleInfo and b.containerVehicleInfo.vehId))
+                local aMatch = (aVeh and tonumber(aVeh) == targetVehId) and 1 or 0
+                local bMatch = (bVeh and tonumber(bVeh) == targetVehId) and 1 or 0
+                return aMatch > bMatch
+              end)
+            end
+          end
+        end
+        return ret
+      end
+    end
+
+    local origExit = cScreenMod.exitCargoOverviewScreen
+    if origExit then
+      cScreenMod.exitCargoOverviewScreen = function(...)
+        lastInteractingVehicleId = nil
+        interactingPlayer = nil
+        return origExit(...)
+      end
+    end
+
+    local origLeave = cScreenMod.onCargoOverviewRouteLeave
+    if origLeave then
+      cScreenMod.onCargoOverviewRouteLeave = function(...)
+        lastInteractingVehicleId = nil
+        interactingPlayer = nil
+        return origLeave(...)
       end
     end
 
@@ -3502,7 +3602,9 @@ local function onPreRender(dt)
       end
     end
   end
-  if (overhaul_vehicles_playerVehicles and not overhaul_vehicles_playerVehicles._careerSplitHooked) or (career_modules_delivery_general and not career_modules_delivery_general._careerSplitContainersHooked) then
+  if (overhaul_vehicles_playerVehicles and not overhaul_vehicles_playerVehicles._careerSplitHooked)
+    or (career_modules_delivery_general and not career_modules_delivery_general._careerSplitContainersHooked)
+    or (overhaul_career_logistics_general and not overhaul_career_logistics_general._careerSplitContainersHooked) then
     hookCareerJobsAndLogistics()
   end
 
