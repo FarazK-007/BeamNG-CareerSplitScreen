@@ -3,19 +3,52 @@
 [![BeamNG Version](https://img.shields.io/badge/BeamNG.drive-v0.33%2B-orange.svg)](https://beamng.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey.svg)]()
-[![Status](https://img.shields.io/badge/Status-Stable%20%2F%20Ready-brightgreen.svg)]()
+[![Status](https://img.shields.io/badge/Status-Early%20Development%20%2F%20Unstable-yellow.svg)]()
+[![Reddit](https://img.shields.io/badge/Reddit-Feedback%20%26%20Community-FF4500?logo=reddit&logoColor=white)](https://www.reddit.com/r/BeamNG/comments/1xevnj7/early_mod_release_career_mode_splitscreen_mod_for/)
+
+> [!WARNING]
+> **Early Development & Unstable Build:**  
+> This mod is currently in active development and should be considered **unstable**. While core co-op features (split-screen rendering, dual GPS, fleet persistence, and logistics deliveries) are working, you may encounter bugs or rough edges. **Always create a backup of your Career Mode save before playing!**  
+> We actively want your feedback: please share bug reports, gameplay clips, and feature suggestions on our [Reddit Discussion & Feedback Thread](https://www.reddit.com/r/BeamNG/comments/1xevnj7/early_mod_release_career_mode_splitscreen_mod_for/).
 
 Enables native, local split-screen multiplayer inside **BeamNG.drive Career Mode**. Play co-op with a friend using owned fleet vehicles from your garage or guest loaners, with independent cameras, separate controllers, individual minimaps, isolated GPS navigation, and fully synchronized parcel delivery missions!
 
 ---
 
+## 💬 Community Feedback & Discussions
+
+Have questions, found a bug, or want to share your thoughts?
+👉 **[Join the Reddit Discussion & Feedback Thread](https://www.reddit.com/r/BeamNG/comments/1xevnj7/early_mod_release_career_mode_splitscreen_mod_for/)** to discuss the mod directly with the developer and other players!
+
+---
+
 ## ✨ Features
 
-### 📦 Independent Co-op Parcel Delivery & Logistics
-- **Full Cargo Delivery Support**: Player 2 can pick up parcels, cargo, and freight at any logistics facility and deliver them to their destination independently.
-- **Independent Drop-Offs**: Player 2 can confirm deliveries at parking spots without requiring Player 1 to be nearby.
+### 📦 Cooperative & Independent Parcel Delivery & Logistics
+- **Team Cargo Deliveries**: Deliveries can be dropped off and completed by **either player** at the destination location, regardless of which player initially picked up the cargo or whose car is transporting it.
+- **Independent Drop-Offs**: Player 2 can drop off parcels, cargo, and freight at parking stalls completely independently without needing Player 1 nearby.
+- **Smart Route Auto-Selection**: Interacting with a parcel pickup screen automatically routes GPS navigation for whichever player opened the prompt (Player 1 or Player 2).
+- **Priority Drop-Off Prompts**: Destination parking stalls prioritize the `[E]` / `(A)` drop-off prompt over the facility inspect screen so you never get stuck opening menus instead of dropping cargo.
 - **Accurate Driver Attribution**: Precision parking rewards and delivery payouts are credited accurately based on the vehicle that actually transported and parked the cargo (Player 1 or Player 2).
 - **Traffic Car Isolation**: Delivery querying exclusively scans player vehicles and inventory, preventing AI or traffic cars from stalling or hanging delivery completion.
+
+### 🎯 Full Secondary Viewport (P2) 3D Marker & Decal Visibility
+- **Always Visible Ground Decals**: Overrides BeamNG's distance-fading calculations (`fadeStart = 20000`, `fadeEnd = 25000`) in split-screen, bypassing the engine quirk where Player 1's camera distance culled Player 2's ground stripes and parking box decals.
+- **Elevated 3D Stall Outlines**: 3D stall boundary boxes (`TSStatic`) are elevated by $+0.05\text{m}$ to prevent pavement z-fighting/clipping, and scaled to a clear bumper height ($0.45\text{m}$) with $0.75$ alpha when near stalls.
+- **Clamped Floating Beacons**: Destination beacon heights are clamped to a clean $2.5\text{m}$ above the stall, eliminating the stock bug where markers shoot $500\text{m}$ into the sky and project outside Player 2's viewport.
+- **Multi-Viewport 3D Skia Billboards**: Renders camera-facing 3D Skia billboard pins (`WorldBillboardRenderer`) for nearby drop-offs, pickups, and parking stalls so secondary players see floating markers directly in their own viewport.
+- **100% Gated to Split-Screen**: When split-screen is deactivated, marker logic immediately reverts completely to stock BeamNG behavior with zero overhead.
+
+### 🗺️ Big Map Mouse Pan & Click-to-Route
+- **Mouse Drag-to-Pan**: Left-click and drag anywhere on the Big Map to smoothly pan the camera, with a refined 6px drag threshold to differentiate between panning and clicking.
+- **Single-Click Waypoint Placement**: Clicking on any road or destination sets a navigation waypoint directly for the currently selected player without dragging.
+- **Center Crosshair Pin**: An always-visible center crosshair pin with controller **(A)**, **Enter**, or **Space** shortcuts to quickly set or clear waypoints.
+- **Top Bar Player Switcher**: Dedicated `Route For: Player 1 | Player 2` selector with isolated click handling so switching players never drops an accidental waypoint underneath the bar.
+- **100% Native in Single-Player**: All Big Map customizations are strictly active during split-screen sessions—single-player freeroam and career navigation remain completely untouched.
+
+### ⚡ Performance & Garbage Collection Optimizations
+- **Stutter-Free Gameplay**: Reusable scratch tables for interaction element querying and activity sorting prevent continuous memory allocation, eliminating garbage collection micro-stutters.
+- **Throttled Resource Checks**: Frame checks and texture lookups are cached and throttled to ensure silky-smooth framerates even on complex Career maps.
 
 ### 🎨 Character & Route Decal Color Matching
 - **Color-Coded Players**:
@@ -51,13 +84,6 @@ Enables native, local split-screen multiplayer inside **BeamNG.drive Career Mode
   - Setting a waypoint for one player does **not** overwrite or interfere with the other player's navigation.
 - **Screen-Isolated 3D Road Decals**: In-world road navigation ribbons display clearly without cross-screen bleeding.
 
-### 🎯 Enhanced Big Map (Split-Screen Gated)
-- **Individual Route Planning**: Top bar switcher (`Route For: Player 1 | Player 2`) allows selecting which player receives newly placed map waypoints.
-- **Center Crosshair Pin**: Always-visible center crosshair pin in split-screen mode for rapid, intuitive destination selection.
-- **Quick Waypoint Marking**: Press **Enter**, **Space**, or **Controller (A)** to instantly drop or clear a route at the crosshair pin.
-- **Drag-Free Mouse Waypoints**: Left-clicking anywhere on the map places a route waypoint directly without panning or dragging the camera.
-- **100% Native in Single-Player**: All Big Map customizations are strictly gated to split-screen sessions—single-player freeroam and career map navigation remain completely untouched.
-
 ### ⚙️ Seamless Radial & Pause Menu Controls
 - **Radial Menu (E / Gamepad D-pad)**:
   - Clean bottom-slot entry (**6 o'clock**) to start or manage split-screen.
@@ -91,7 +117,7 @@ Enables native, local split-screen multiplayer inside **BeamNG.drive Career Mode
    `%LocalAppData%\BeamNG\BeamNG.drive\current\mods\`
 
 ### Option 2: Manual Install (.zip)
-1. Download the pre-built `CareerSplitScreen.zip` from the latest GitHub Release.
+1. Download the pre-built `CareerSplitScreen.zip` from the latest [GitHub Release](https://github.com/FarazK-007/BeamNG-CareerSplitScreen/releases).
 2. Move `CareerSplitScreen.zip` into your BeamNG mods folder:
    ```
    C:\Users\<YourUsername>\AppData\Local\BeamNG\BeamNG.drive\current\mods\
@@ -121,7 +147,8 @@ Enables native, local split-screen multiplayer inside **BeamNG.drive Career Mode
 | **Radial Menu** | `E` | `D-Pad Down` | Open radial action wheel |
 | **Pause Menu** | `ESC` | `Start / Options` | Open pause menu with split-screen rail |
 | **Big Map** | `M` | `Select / View` | Open world map with dual player route selector |
-| **Set Route at Pin** | `Enter` / `Space` | `(A)` | Drop or remove navigation waypoint at map pin |
+| **Big Map Pan** | `Left-Click + Drag` | `Thumbstick` | Smoothly pan around the Big Map |
+| **Set Route at Click / Pin** | `Left-Click` / `Enter` / `Space` | `(A)` | Drop or remove navigation waypoint at cursor or center pin |
 | **Interact / Drop-Off** | `E` | `(A)` / Configured | Trigger delivery drop-off, gas pump, or garage prompt |
 | **Get In / Out** | `F` | `(Y)` / Configured | Exit vehicle to walk or enter another vehicle |
 
@@ -151,7 +178,7 @@ CareerSplitScreen/
 │           │   └── input/actions/
 │           │       └── careerSplitScreen.json     # Custom action definitions
 │           ├── gameplay/
-│           │   ├── markerInteraction.lua          # Per-player interaction prompts & bounds
+│           │   ├── markerInteraction.lua          # Per-player interaction prompts, 3D markers & bounds
 │           │   └── rawPois.lua                    # POI resolution
 │           ├── render/
 │           │   └── splitScreen.lua                # Split-screen viewport rendering
@@ -177,9 +204,11 @@ CareerSplitScreen/
 
 ---
 
-## 🤝 Contributing
+## 🤝 Contributing & Feedback
 
-Contributions, bug reports, and feature suggestions are welcome! Feel free to open an Issue or submit a Pull Request.
+We welcome all feedback, bug reports, and pull requests!
+- **Feedback & Bug Reports**: Post on our [Reddit Discussion Thread](https://www.reddit.com/r/BeamNG/comments/1xevnj7/early_mod_release_career_mode_splitscreen_mod_for/).
+- **GitHub Issues**: Open an Issue on this repository for technical bugs or code contributions.
 
 ---
 
