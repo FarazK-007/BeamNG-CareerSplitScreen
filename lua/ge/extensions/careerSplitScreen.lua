@@ -1281,12 +1281,19 @@ local origExitBigMap = nil
 local _bigMapToggling = false  -- re-entrancy guard to prevent RLS wrapper infinite recursion
 
 local function careerToggleBigMap(...)
-  -- Re-entrancy guard: some wrappers (e.g. RLS toggleBigMapWrapper) call freeroam_bigMapMode.toggleBigMap()
-  -- which is now *this* function, causing infinite recursion. Block it.
+  -- In single-player, pass through immediately to original
+  if not isSplitModeActive() then
+    if origToggleBigMap and origToggleBigMap ~= careerToggleBigMap then
+      return origToggleBigMap(...)
+    end
+    return
+  end
+
+  -- Re-entrancy guard: some wrappers call freeroam_bigMapMode.toggleBigMap()
   if _bigMapToggling then return end
   _bigMapToggling = true
   local ok, err = pcall(function(...)
-    if isSplitModeActive() or isCareerModeActive() then
+    if isSplitModeActive() then
       if freeroam_bigMapMode and freeroam_bigMapMode.bigMapActive and freeroam_bigMapMode.bigMapActive() then
         freeroam_bigMapMode.exitBigMap(true, true)
         return
@@ -1297,7 +1304,9 @@ local function careerToggleBigMap(...)
           if overhaul_phone_phone and overhaul_phone_phone.isPhoneOpen and overhaul_phone_phone.isPhoneOpen() then
             overhaul_phone_phone.closePhone()
           end
-          if freeroam_bigMapMode and freeroam_bigMapMode.enterBigMap then
+          if origEnterBigMap and origEnterBigMap ~= careerEnterBigMap then
+            origEnterBigMap({instant = true, forceOpen = true})
+          elseif freeroam_bigMapMode and freeroam_bigMapMode.enterBigMap then
             freeroam_bigMapMode.enterBigMap({instant = true, forceOpen = true})
           end
           return
@@ -1308,7 +1317,9 @@ local function careerToggleBigMap(...)
       origToggleBigMap(...)
       return
     end
-    if freeroam_bigMapMode and freeroam_bigMapMode.enterBigMap then
+    if origEnterBigMap and origEnterBigMap ~= careerEnterBigMap then
+      origEnterBigMap({instant = true, forceOpen = true})
+    elseif freeroam_bigMapMode and freeroam_bigMapMode.enterBigMap then
       freeroam_bigMapMode.enterBigMap({instant = true, forceOpen = true})
     end
   end, ...)
@@ -1373,24 +1384,53 @@ local function hookBigMapCamera()
   end
 end
 
+local function unhookBigMapMode()
+  if not freeroam_bigMapMode or not freeroam_bigMapMode._careerSplitBigMapHooked then return end
+
+  if freeroam_bigMapMode.toggleBigMap == careerToggleBigMap and origToggleBigMap then
+    freeroam_bigMapMode.toggleBigMap = origToggleBigMap
+  end
+  if freeroam_bigMapMode.enterBigMap == careerEnterBigMap and origEnterBigMap then
+    freeroam_bigMapMode.enterBigMap = origEnterBigMap
+  end
+  if freeroam_bigMapMode.exitBigMap == careerExitBigMap and origExitBigMap then
+    freeroam_bigMapMode.exitBigMap = origExitBigMap
+  end
+
+  freeroam_bigMapMode._careerSplitBigMapHooked = nil
+  origToggleBigMap = nil
+  origEnterBigMap = nil
+  origExitBigMap = nil
+end
+
 local function hookBigMapMode()
   if not freeroam_bigMapMode then return end
+  if not isSplitModeActive() then return end
+  if freeroam_bigMapMode._careerSplitBigMapHooked then return end
+  freeroam_bigMapMode._careerSplitBigMapHooked = true
+
   hookBigMapCamera()
 
-  if freeroam_bigMapMode.toggleBigMap ~= careerToggleBigMap then
-    origToggleBigMap = freeroam_bigMapMode.toggleBigMap
-    freeroam_bigMapMode.toggleBigMap = careerToggleBigMap
-  end
+  origToggleBigMap = freeroam_bigMapMode.toggleBigMap
+  freeroam_bigMapMode.toggleBigMap = careerToggleBigMap
 
-  if freeroam_bigMapMode.enterBigMap ~= careerEnterBigMap then
-    origEnterBigMap = freeroam_bigMapMode.enterBigMap
-    freeroam_bigMapMode.enterBigMap = careerEnterBigMap
-  end
+  origEnterBigMap = freeroam_bigMapMode.enterBigMap
+  freeroam_bigMapMode.enterBigMap = careerEnterBigMap
 
-  if freeroam_bigMapMode.exitBigMap ~= careerExitBigMap then
-    origExitBigMap = freeroam_bigMapMode.exitBigMap
-    freeroam_bigMapMode.exitBigMap = careerExitBigMap
-  end
+  origExitBigMap = freeroam_bigMapMode.exitBigMap
+  freeroam_bigMapMode.exitBigMap = careerExitBigMap
+
+  -- Cooperate with RLS Career Overhaul's wrapperLifetime if active:
+  pcall(function()
+    local wl = package.loaded['overhaul/lib/shell/wrapperLifetime']
+    if not wl then
+      local ok, mod = pcall(require, 'overhaul/lib/shell/wrapperLifetime')
+      if ok then wl = mod end
+    end
+    if wl and wl.registerForwarder and origToggleBigMap then
+      wl.registerForwarder(careerToggleBigMap, origToggleBigMap)
+    end
+  end)
 
   if not freeroam_bigMapMode._careerSplitCamHooked then
     freeroam_bigMapMode._careerSplitCamHooked = true
@@ -2097,6 +2137,7 @@ local function stopSplitScreen()
   if not isSplitActive then return end
   isSplitActive = false
   removeCargoGuihook()
+  unhookBigMapMode()
   lastInteractingVehicleId = nil
   interactingPlayer = nil
 
@@ -3797,7 +3838,6 @@ local function onPreRender(dt)
   hookCheckTimer = hookCheckTimer + dt
   if hookCheckTimer >= 1 then
     hookCheckTimer = 0
-    hookBigMapMode()
     if core_multiseat and (isSplitModeActive() or isCareerModeActive()) then
       if core_multiseat.isMultiseatActive() then
         hookCoreMultiseat()
@@ -3847,9 +3887,12 @@ local function onExtensionLoaded(extName)
   ensureSinglePlayerInputState()
   patchReputationModule()
   setExtensionUnloadMode(M, "manual")
-  hookBigMapMode()
   hookCareerJobsAndLogistics()
   log("I", "careerSplitScreen", "Career Split-Screen extension initialized.")
+end
+
+local function onExtensionUnloaded(extName)
+  unhookBigMapMode()
 end
 
 M.getRouteTargetPlayer = function() return getRouteTargetPlayer() end
@@ -3874,6 +3917,7 @@ M.getP2Vehicle = getP2Vehicle
 M.getP2VehicleId = function() return p2VehicleId end
 
 M.onExtensionLoaded = onExtensionLoaded
+M.onExtensionUnloaded = onExtensionUnloaded
 M.onPreRender = onPreRender
 M.onGameplayInteract = onGameplayInteract
 M.onActivityAcceptUpdate = onActivityAcceptUpdate
